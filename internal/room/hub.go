@@ -177,17 +177,17 @@ func (h *Hub) run(ctx context.Context) {
 
 func (h *Hub) broadcast(msg []byte) {
 	h.mu.RLock()
-	clients := make([]*client, 0, len(h.clients))
+	stale := make([]*client, 0)
 	for c := range h.clients {
-		clients = append(clients, c)
-	}
-	h.mu.RUnlock()
-	for _, c := range clients {
 		select {
 		case c.send <- append([]byte(nil), msg...):
 		default:
-			h.remove(c)
+			stale = append(stale, c)
 		}
+	}
+	h.mu.RUnlock()
+	for _, c := range stale {
+		h.remove(c)
 	}
 }
 

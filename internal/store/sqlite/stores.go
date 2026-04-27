@@ -217,6 +217,16 @@ func (s *VideoStore) UpdateStatus(ctx context.Context, id string, status model.V
 	return requireRows(res)
 }
 
+func (s *VideoStore) Update(ctx context.Context, video *model.Video) error {
+	video.UpdatedAt = utcNow()
+	res, err := s.db.ExecContext(ctx, `UPDATE videos SET title = ?, file_path = ?, poster_path = ?, duration = ?, format = ?, size = ?, source_url = ?, status = ?, updated_at = ? WHERE id = ?`,
+		video.Title, video.FilePath, video.PosterPath, video.Duration, video.Format, video.Size, video.SourceURL, string(video.Status), formatTime(video.UpdatedAt), video.ID)
+	if err != nil {
+		return wrapConstraint(err)
+	}
+	return requireRows(res)
+}
+
 func (s *VideoStore) Delete(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM videos WHERE id = ?`, id)
 	if err != nil {
@@ -274,6 +284,16 @@ func (s *DownloadTaskStore) List(ctx context.Context) ([]*model.DownloadTask, er
 
 func (s *DownloadTaskStore) UpdateProgress(ctx context.Context, id string, progress float64, status model.DownloadTaskStatus) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE download_tasks SET progress = ?, status = ?, updated_at = ? WHERE id = ?`, progress, string(status), formatTime(utcNow()), id)
+	if err != nil {
+		return err
+	}
+	return requireRows(res)
+}
+
+func (s *DownloadTaskStore) UpdateResult(ctx context.Context, task *model.DownloadTask) error {
+	task.UpdatedAt = utcNow()
+	res, err := s.db.ExecContext(ctx, `UPDATE download_tasks SET video_id = ?, progress = ?, status = ?, error = ?, updated_at = ? WHERE id = ?`,
+		task.VideoID, task.Progress, string(task.Status), task.Error, formatTime(task.UpdatedAt), task.ID)
 	if err != nil {
 		return err
 	}

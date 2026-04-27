@@ -8,7 +8,9 @@ import (
 
 	"watchtogether/internal/auth"
 	"watchtogether/internal/cache"
+	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
+	"watchtogether/internal/download"
 	roomhub "watchtogether/internal/room"
 	"watchtogether/internal/store"
 	"watchtogether/pkg/apierr"
@@ -23,6 +25,8 @@ type Dependencies struct {
 	SessionCache      cache.SessionCache
 	RoomStateCache    cache.RoomStateCache
 	PubSub            cache.PubSub
+	Capabilities      capabilities.Report
+	DownloadService   *download.Service
 }
 
 func NewRouter(deps Dependencies) *gin.Engine {
@@ -53,8 +57,11 @@ func NewRouter(deps Dependencies) *gin.Engine {
 
 	authService := auth.NewService(deps.UserStore, deps.SessionCache, deps.Config)
 	hubs := roomhub.NewManager(deps.PubSub, deps.RoomStateCache)
+	registerCapabilityRoutes(router, deps)
 	registerAuthRoutes(router, deps, authService)
 	registerRoomRoutes(router, deps, authService, hubs)
+	registerDownloadRoutes(router, deps, authService)
+	registerVideoRoutes(router, deps, authService)
 
 	return router
 }

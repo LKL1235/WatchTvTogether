@@ -14,7 +14,9 @@ import (
 	"watchtogether/internal/api"
 	"watchtogether/internal/cache"
 	"watchtogether/internal/cache/memory"
+	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
+	"watchtogether/internal/download"
 	"watchtogether/internal/store"
 	"watchtogether/internal/store/sqlite"
 )
@@ -56,6 +58,13 @@ func run() error {
 		return err
 	}
 
+	caps := capabilities.Check(context.Background())
+	capabilities.Log(caps)
+	rootCtx, stopDownloads := context.WithCancel(context.Background())
+	defer stopDownloads()
+	downloads := download.NewServiceWithOptions(st.downloadTasks, st.videos, cfg, caps, download.WithPubSub(ca.pubsub))
+	downloads.Start(rootCtx, cfg.DownloadWorkers)
+
 	router := api.NewRouter(api.Dependencies{
 		Config:            cfg,
 		UserStore:         st.users,
@@ -65,6 +74,8 @@ func run() error {
 		SessionCache:      ca.sessions,
 		RoomStateCache:    ca.roomStates,
 		PubSub:            ca.pubsub,
+		Capabilities:      caps,
+		DownloadService:   downloads,
 	})
 
 	srv := &http.Server{
