@@ -1,4 +1,4 @@
-import type { AuthTokens, Room, RoomState, User } from './types'
+import type { AuthTokens, CapabilityReport, DownloadTask, Room, RoomState, User, Video } from './types'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
 
@@ -100,4 +100,48 @@ export function fetchRoom(token: string, roomId: string) {
 
 export function fetchRoomState(token: string, roomId: string) {
   return apiFetch<RoomState>(`/api/rooms/${roomId}/state`, {}, token)
+}
+
+export function fetchVideos(token: string, opts: string | { query?: string; status?: string } = '') {
+  const query = typeof opts === 'string' ? opts : (opts.query ?? '')
+  const status = typeof opts === 'string' ? 'ready' : (opts.status ?? 'ready')
+  const params = new URLSearchParams({ limit: '50' })
+  if (status) {
+    params.set('status', status)
+  }
+  if (query.trim()) {
+    params.set('q', query.trim())
+  }
+  return apiFetch<{ items: Video[]; total: number }>(`/api/videos?${params}`, {}, token)
+}
+
+export function deleteVideo(token: string, id: string) {
+  return apiFetch<void>(`/api/admin/videos/${id}`, { method: 'DELETE' }, token)
+}
+
+export function fetchDownloads(token: string) {
+  return apiFetch<{ items: DownloadTask[] }>('/api/admin/downloads', {}, token)
+}
+
+export function createDownload(token: string, sourceUrl: string) {
+  return apiFetch<DownloadTask>(
+    '/api/admin/downloads',
+    {
+      method: 'POST',
+      body: JSON.stringify({ source_url: sourceUrl }),
+    },
+    token,
+  )
+}
+
+export function cancelDownload(token: string, taskId: string) {
+  return apiFetch<void>(`/api/admin/downloads/${taskId}`, { method: 'DELETE' }, token)
+}
+
+export function kickRoomMember(token: string, roomId: string, userId: string) {
+  return apiFetch<void>(`/api/rooms/${roomId}/kick/${userId}`, { method: 'POST' }, token)
+}
+
+export function fetchCapabilities(token: string) {
+  return apiFetch<CapabilityReport>('/api/capabilities', {}, token)
 }

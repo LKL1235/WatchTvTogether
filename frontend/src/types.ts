@@ -32,3 +32,43 @@ export interface RoomState {
   updated_by?: string
   updated_at?: string
 }
+
+export interface Video {
+  id: string
+  title: string
+  file_path: string
+  file_url?: string
+  poster_path?: string
+  duration: number
+  format: string
+  size: number
+  source_url?: string
+  status: 'processing' | 'ready' | 'error'
+  created_at: string
+  updated_at: string
+}
+
+export interface DownloadTask {
+  id: string
+  user_id: string
+  source_url: string
+  video_id?: string
+  progress: number
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'canceled'
+  error?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CapabilityReport {
+  ffmpeg: boolean
+  ffprobe: boolean
+  ytdlp: boolean
+  aria2: boolean
+  features: {
+    hls_download: boolean
+    poster_generation: boolean
+    ytdlp_import: boolean
+    magnet_download: boolean
+  }
+}

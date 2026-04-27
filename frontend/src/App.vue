@@ -32,7 +32,7 @@ onMounted(() => {
       </nav>
     </header>
 
-    <AdminView v-if="showAdmin" />
+    <AdminView v-if="showAdmin" @open-room="currentRoom = $event; showAdmin = false" />
     <RoomView v-else-if="currentRoom" :room="currentRoom" @back="currentRoom = null" />
     <LobbyView v-else @open-room="currentRoom = $event" />
   </main>

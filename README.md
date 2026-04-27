@@ -180,22 +180,21 @@ func main() {
 
 ### 已完成 / 已接入
 
-- M0：Store / Cache Interface、SQLite 存储、内存缓存、接口一致性测试已完成。
+- M0：Store / Cache Interface、SQLite / PostgreSQL 存储、内存 / Redis 缓存、接口一致性测试已完成。
 - M1：Gin 服务框架、配置加载、健康检查、静态文件服务、注册登录、JWT / RBAC 已完成。
 - M2：房间 CRUD、WebSocket 房间同步、房间状态快照、心跳与 Hub 清理已完成。
 - M4/M5 后端主体：下载任务队列、直链 / HLS / yt-dlp / aria2 下载路径、下载进度推送、下载后入库、视频查询 / 删除 / Range 播放已接入。
+- M6：Dockerfile、生产/开发 Compose、GitHub Actions CI/CD 与 `.env.example` 已完成。
 - 工具能力检测：`ffmpeg`、`ffprobe`、`yt-dlp`、`aria2c` 启动检测与 `GET /api/capabilities` 已接入。
 
 ### 部分完成
 
-- M3 前端：登录 / 注册、大厅、创建房间、房间同步控制的基础 UI 已完成；真实播放器、拖拽队列、视频库选择与完整管理员后台仍是占位或简化实现。
+- M3 前端：登录 / 注册、大厅、创建房间、HLS/MP4 播放器、视频队列、视频库选择、下载管理与管理员后台基础交互已完成；在线成员仍依赖当前 WebSocket 事件做轻量展示。
 - M4/M5 媒体处理：视频元数据与海报提取已接入下载完成流程；实际能力取决于运行环境中的 `ffprobe` / `ffmpeg` 可用性。
 
 ### 待完成
 
-- PostgreSQL Store、Redis Cache、数据库迁移脚本。
-- 完整前端视频库 / 下载管理 / 管理员后台交互。
-- Dockerfile、Docker Compose、GitHub Actions CI/CD。
+- 多实例生产压测与细粒度运维指标。
 
 ---
 
@@ -226,18 +225,18 @@ func main() {
 
 #### 0.4 PostgreSQL 实现（生产阶段底层，可后续补充）
 
-- [ ] 实现 `internal/store/postgres/` 下所有 Store interface（使用 `pgx/v5`）
-- [ ] 编写 SQL 迁移脚本（`migrations/`，使用 `golang-migrate`）
+- [x] 实现 `internal/store/postgres/` 下所有 Store interface（使用 `pgx/v5`）
+- [x] 编写 SQL 迁移脚本（`migrations/`，使用 `golang-migrate`）
 
 #### 0.5 Redis 实现（生产阶段底层，可后续补充）
 
-- [ ] 实现 `internal/cache/redis/` 下所有 Cache interface（使用 `go-redis/v9`）
+- [x] 实现 `internal/cache/redis/` 下所有 Cache interface（使用 `go-redis/v9`）
 
 #### 0.6 配置与依赖注入
 
 - [x] 在 `internal/config/` 定义配置结构（支持环境变量 + 配置文件）
-- [x] 在 `cmd/server/main.go` 实现工厂函数：根据 `STORAGE_BACKEND=sqlite|postgres` 和 `CACHE_BACKEND=memory|redis` 动态选择实现（已接入 SQLite / Memory，Postgres / Redis 待后续实现后接入）
-- [x] 编写接口实现一致性测试（`internal/store/testutil/`），SQLite 已接入，Postgres 实现补充后复用同一套测试用例
+- [x] 在 `cmd/server/main.go` 实现工厂函数：根据 `STORAGE_BACKEND=sqlite|postgres` 和 `CACHE_BACKEND=memory|redis` 动态选择实现（SQLite / PostgreSQL、Memory / Redis 均已接入）
+- [x] 编写接口实现一致性测试（`internal/store/testutil/`），SQLite 与 PostgreSQL 共用同一套测试用例
 
 ---
 
@@ -334,12 +333,12 @@ GET       /api/rooms/:roomId/state   → 房间播放状态快照（初次加入
 - [x] **登录 / 注册页**：账号密码注册与登录
 - [x] **首页/大厅**：展示公开房间列表，支持创建房间
 - [x] **房间创建弹窗**：房间名、公开/私有、可选密码
-- [ ] **房间页**（核心，部分完成）：
-  - [ ] 真实视频播放器（HLS.js / Video.js）接入
+- [x] **房间页**（核心，基础交互已完成）：
+  - [x] 真实视频播放器（HLS.js / 原生 MP4）接入
   - [x] 播放控制栏权限控制：房主/admin 可操作，普通成员只读
-  - [ ] 视频队列拖拽排序、删除、添加 URL 或从视频库选择
-  - [ ] 在线成员列表基础展示已完成；踢出交互仍待接入后端调用
-- [ ] **管理员后台**：当前为入口占位，用户管理、视频库管理、房间监控详情待接入
+  - [x] 视频队列拖拽排序、删除、添加 URL 或从视频库选择
+  - [x] 在线成员列表基础展示已完成；踢出交互已接入后端调用
+- [x] **管理员后台**：下载任务、视频库管理、房间监控基础交互已接入
 - [x] WebSocket 连接管理（composable `useRoomSocket`）：
   - 接收 `sync` 消息后同步本地播放器进度
   - 普通成员播放器控制栏置为禁用只读
@@ -471,14 +470,14 @@ watchtogether/
 
 ## CI/CD 与容器化部署
 
-> **待实现**：本节描述 CI/CD 与容器化部署的需求规格，具体工作流文件与 Dockerfile 将在 M6 阶段落地。
+> **已接入**：M6 已落地 Dockerfile、生产/开发 Compose、`.env.example`、GitHub Actions CI 与 CD 工作流。
 
 ### 需求目标
 
-- [ ] 代码推送到 `main` 分支或合并 PR 时，自动触发 CI 流水线（编译 + 单元测试 + lint）
-- [ ] 打 Tag（`v*.*.*`）时，自动触发 CD 流水线，构建多平台 Docker 镜像并推送到镜像仓库
-- [ ] 镜像仓库目标：GitHub Container Registry（GHCR），可选同步推送到 Docker Hub
-- [ ] 生产部署通过 Docker Compose 完成，镜像内需保证 `ffmpeg` 与 `yt-dlp` 可用
+- [x] 代码推送到 `main` 分支或合并 PR 时，自动触发 CI 流水线（编译 + 单元测试 + lint）
+- [x] 打 Tag（`v*.*.*`）时，自动触发 CD 流水线，构建多平台 Docker 镜像并推送到镜像仓库
+- [x] 镜像仓库目标：GitHub Container Registry（GHCR），可选同步推送到 Docker Hub
+- [x] 生产部署通过 Docker Compose 完成，镜像内需保证 `ffmpeg` 与 `yt-dlp` 可用
 
 ### CI 流水线需求（`.github/workflows/ci.yml`）
 
@@ -621,9 +620,9 @@ GET /api/capabilities
 - Redis 7+
 - 切换方式：设置环境变量 `STORAGE_BACKEND=postgres` + `CACHE_BACKEND=redis` 并配置对应 DSN/地址
 
-### 使用 Docker（规划中）
+### 使用 Docker
 
-Dockerfile 与 Compose 文件尚未落地。规划中的生产镜像将内置 Go 编译产物、FFmpeg 与 yt-dlp，并通过环境变量或挂载 `config.yaml` 注入 `STORAGE_BACKEND`、`CACHE_BACKEND` 等配置。
+已提供 `Dockerfile`、`docker-compose.yml`、`docker-compose.dev.yml` 与 `.env.example`。生产 Compose 默认启用 PostgreSQL + Redis，开发 Compose 使用 SQLite + 内存缓存快速验证容器行为。
 
 ### 配置示例（`config.yaml`）
 

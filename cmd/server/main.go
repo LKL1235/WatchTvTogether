@@ -14,10 +14,12 @@ import (
 	"watchtogether/internal/api"
 	"watchtogether/internal/cache"
 	"watchtogether/internal/cache/memory"
+	rediscache "watchtogether/internal/cache/redis"
 	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
 	"watchtogether/internal/download"
 	"watchtogether/internal/store"
+	"watchtogether/internal/store/postgres"
 	"watchtogether/internal/store/sqlite"
 )
 
@@ -30,6 +32,7 @@ type stores struct {
 }
 
 type caches struct {
+	close      func() error
 	sessions   cache.SessionCache
 	roomStates cache.RoomStateCache
 	pubsub     cache.PubSub
@@ -56,6 +59,9 @@ func run() error {
 	ca, err := newCaches(cfg)
 	if err != nil {
 		return err
+	}
+	if ca.close != nil {
+		defer ca.close()
 	}
 
 	caps := capabilities.Check(context.Background())
@@ -120,7 +126,17 @@ func newStores(cfg config.Config) (*stores, error) {
 			downloadTasks: sqlite.NewDownloadTaskStore(db),
 		}, nil
 	case "postgres":
-		return nil, errors.New("postgres store backend is not implemented yet")
+		db, err := postgres.Open(context.Background(), cfg.PostgresDSN)
+		if err != nil {
+			return nil, err
+		}
+		return &stores{
+			db:            db,
+			users:         postgres.NewUserStore(db),
+			rooms:         postgres.NewRoomStore(db),
+			videos:        postgres.NewVideoStore(db),
+			downloadTasks: postgres.NewDownloadTaskStore(db),
+		}, nil
 	default:
 		return nil, errors.New("unsupported storage backend: " + cfg.StorageBackend)
 	}
@@ -135,7 +151,17 @@ func newCaches(cfg config.Config) (*caches, error) {
 			pubsub:     memory.NewPubSub(),
 		}, nil
 	case "redis":
-		return nil, errors.New("redis cache backend is not implemented yet")
+		client := rediscache.NewClient(cfg.RedisAddr)
+		if err := client.Ping(context.Background()).Err(); err != nil {
+			_ = client.Close()
+			return nil, err
+		}
+		return &caches{
+			close:      client.Close,
+			sessions:   rediscache.NewSessionCache(client),
+			roomStates: rediscache.NewRoomStateCache(client),
+			pubsub:     rediscache.NewPubSub(client),
+		}, nil
 	default:
 		return nil, errors.New("unsupported cache backend: " + cfg.CacheBackend)
 	}
