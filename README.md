@@ -5,6 +5,36 @@
 
 ---
 
+## Quick start
+
+下面两种方式任选其一：前者适合「静态站点托管 + 自建 API」；后者适合「一条命令在本地/服务器跑齐前后端」。
+
+### 方式一：Vercel 前端 + 自托管后端
+
+1. 在 [Vercel](https://vercel.com) 中 **Import** 本仓库。若根目录已提供 `vercel.json`，会按其中配置在 `frontend/` 下执行安装与构建；**否则** 在项目 **Settings → General** 里将 **Root Directory** 设为 `frontend`，Build 命令 `npm run build`，输出目录 `dist`。
+2. 在 **Settings → Environment Variables** 中设置 `VITE_API_BASE`，值为后端对浏览器可访问的基础地址（例如 `https://api.你的域名`，**不要**在末尾加 `/`）。需自行在服务器上部署并暴露 Go 服务，并在后端为前端所在域名配置 **CORS**；若使用 WebSocket，需保证公网/内网到后端的 `ws` 或 `wss` 可连通（见前端对 `/api`、`/ws` 等路径的访问方式）。
+3. 触发部署后，使用 Vercel 给出的站点 URL 即可打开页面。
+
+### 方式二：Docker Compose（前后端一体）
+
+镜像在构建时会把 Vite 产物嵌入 Go 进程，**同一端口** 提供 API 与静态资源，适合本地或单机服务器快速体验。
+
+**开发 / 轻量单容器（SQLite + 内存缓存）：**
+
+```bash
+docker compose -f docker-compose.dev.yml up -d --build
+```
+
+**带 PostgreSQL + Redis 的样例（更接近生产，请先参考 `.env.example` 准备 `.env` 并调整密钥等）：**
+
+```bash
+docker compose up -d --build
+```
+
+默认在 `http://localhost:8080` 访问；宿主机端口可通过环境变量 `APP_PORT` 等调整，详见各 Compose 文件。
+
+---
+
 ## 技术栈概览
 
 | 层级 | 技术选型 |
