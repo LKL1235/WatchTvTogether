@@ -35,6 +35,7 @@ type Config struct {
 	DownloadWorkers  int           `yaml:"download_workers"`
 	Aria2RPCURL      string        `yaml:"aria2_rpc_url"`
 	Aria2Secret      string        `yaml:"aria2_secret"`
+	CorsOrigins      []string      `yaml:"cors_origins"`
 }
 
 func Default() Config {
@@ -98,6 +99,20 @@ func applyEnv(cfg *Config) {
 	setInt(&cfg.DownloadWorkers, "DOWNLOAD_WORKERS")
 	setString(&cfg.Aria2RPCURL, "ARIA2_RPC_URL")
 	setString(&cfg.Aria2Secret, "ARIA2_SECRET")
+	if v := strings.TrimSpace(os.Getenv("CORS_ORIGINS")); v != "" {
+		cfg.CorsOrigins = splitCSV(v)
+	}
+}
+
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		p := strings.TrimSpace(part)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func setString(target *string, key string) {

@@ -11,14 +11,12 @@ import (
 	authsvc "watchtogether/internal/auth"
 	"watchtogether/internal/download"
 	"watchtogether/pkg/apierr"
+	"watchtogether/pkg/corsutil"
 )
 
 var downloadWSUpgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
 }
 
 type downloadHandler struct {
@@ -41,6 +39,7 @@ func registerDownloadRoutes(router *gin.Engine, deps Dependencies, authService *
 	if downloadService == nil {
 		return
 	}
+	downloadWSUpgrader.CheckOrigin = corsutil.CheckOrigin(deps.Config.CorsOrigins)
 	h := &downloadHandler{deps: deps, service: downloadService, auth: authService}
 	admin := router.Group("/api/admin", requireAuth(authService), requireAdmin)
 	admin.POST("/downloads", h.create)

@@ -14,6 +14,7 @@ import (
 
 	"watchtogether/internal/cache"
 	"watchtogether/internal/model"
+	"watchtogether/pkg/corsutil"
 )
 
 const (
@@ -233,12 +234,17 @@ func (h *Hub) publish(ctx context.Context, msg Message) {
 	_ = h.pubsub.Publish(ctx, h.channel, b)
 }
 
+var wsCheckOrigin = corsutil.CheckOrigin(nil)
+
+// InitWebSocketCheckOrigin 设置房间 WebSocket 的 Origin 校验，应与 HTTP CORS 允许列表一致（在创建路由前调用一次）。
+func InitWebSocketCheckOrigin(allowed []string) {
+	wsCheckOrigin = corsutil.CheckOrigin(allowed)
+}
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
+	CheckOrigin:     func(r *http.Request) bool { return wsCheckOrigin(r) },
 }
 
 type client struct {

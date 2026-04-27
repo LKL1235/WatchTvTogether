@@ -14,6 +14,7 @@ import (
 	roomhub "watchtogether/internal/room"
 	"watchtogether/internal/store"
 	"watchtogether/pkg/apierr"
+	"watchtogether/pkg/corsutil"
 )
 
 type Dependencies struct {
@@ -32,13 +33,8 @@ type Dependencies struct {
 func NewRouter(deps Dependencies) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
-	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "Range"},
-		ExposeHeaders:    []string{"Content-Length", "Content-Range", "Accept-Ranges"},
-		AllowCredentials: false,
-	}))
+	router.Use(cors.New(corsutil.GinConfig(deps.Config.CorsOrigins)))
+	roomhub.InitWebSocketCheckOrigin(deps.Config.CorsOrigins)
 
 	router.NoRoute(func(c *gin.Context) {
 		apierr.Abort(c, apierr.NotFound("route not found"))
