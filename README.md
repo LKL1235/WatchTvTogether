@@ -10,7 +10,7 @@
 | 层级 | 技术选型 |
 |------|----------|
 | 后端 | Go（Gin）、WebSocket（gorilla/websocket）、FFmpeg、yt-dlp / aria2 |
-| 前端 | Vue 3 + Vite、Pinia、HLS.js / Video.js |
+| 前端 | Vue 3 + Vite、Pinia、HLS.js（Video.js 作为依赖预留）|
 | 鉴权 | 账号密码（注册/登录）+ JWT（Access / Refresh）|
 | 数据库（开发）| SQLite（用户/房间/视频元数据）|
 | 缓存（开发）| 内存 Map（房间状态/会话/Pub/Sub）|
@@ -173,28 +173,6 @@ func main() {
   "payload": { ... }
 }
 ```
-
----
-
-## 当前完成度快照
-
-### 已完成 / 已接入
-
-- M0：Store / Cache Interface、SQLite / PostgreSQL 存储、内存 / Redis 缓存、接口一致性测试已完成。
-- M1：Gin 服务框架、配置加载、健康检查、静态文件服务、注册登录、JWT / RBAC 已完成。
-- M2：房间 CRUD、WebSocket 房间同步、房间状态快照、心跳与 Hub 清理已完成。
-- M4/M5 后端主体：下载任务队列、直链 / HLS / yt-dlp / aria2 下载路径、下载进度推送、下载后入库、视频查询 / 删除 / Range 播放已接入。
-- M6：Dockerfile、生产/开发 Compose、GitHub Actions CI/CD 与 `.env.example` 已完成。
-- 工具能力检测：`ffmpeg`、`ffprobe`、`yt-dlp`、`aria2c` 启动检测与 `GET /api/capabilities` 已接入。
-
-### 部分完成
-
-- M3 前端：登录 / 注册、大厅、创建房间、HLS/MP4 播放器、视频队列、视频库选择、下载管理与管理员后台基础交互已完成；在线成员仍依赖当前 WebSocket 事件做轻量展示。
-- M4/M5 媒体处理：视频元数据与海报提取已接入下载完成流程；实际能力取决于运行环境中的 `ffprobe` / `ffmpeg` 可用性。
-
-### 待完成
-
-- 多实例生产压测与细粒度运维指标。
 
 ---
 
@@ -474,7 +452,7 @@ watchtogether/
 
 ### 需求目标
 
-- [x] 代码推送到 `main` 分支或合并 PR 时，自动触发 CI 流水线（编译 + 单元测试 + lint）
+- [x] 代码推送到 `main` 分支或合并 PR 时，自动触发 CI 流水线（Go 测试 + 前端构建）
 - [x] 打 Tag（`v*.*.*`）时，自动触发 CD 流水线，构建多平台 Docker 镜像并推送到镜像仓库
 - [x] 镜像仓库目标：GitHub Container Registry（GHCR），可选同步推送到 Docker Hub
 - [x] 生产部署通过 Docker Compose 完成，镜像内需保证 `ffmpeg` 与 `yt-dlp` 可用
@@ -485,10 +463,10 @@ watchtogether/
 
 流程步骤：
 1. 检出代码
-2. 安装 Go 1.22 工具链（含缓存）
-3. 在 CI 环境中安装 `ffmpeg`（apt）与 `yt-dlp`（静态二进制），确保工具可用分支被测试覆盖
-4. `golangci-lint`（代码风格与静态分析）
-5. `go test -race ./...`（含竞态检测）
+2. 安装 Go 1.25 工具链（含缓存）
+3. 在 CI 环境中安装 `ffmpeg`（apt）与 `yt-dlp`（pip），确保工具可用分支被测试覆盖
+4. `go test -race ./...`（含竞态检测）
+5. 安装 Node.js 20，执行前端依赖安装与生产构建
 
 ### CD 流水线需求（`.github/workflows/cd.yml`）
 
@@ -512,7 +490,8 @@ watchtogether/
 
 采用**多阶段构建**以减小最终镜像体积：
 
-- **builder 阶段**：`golang:1.22-alpine` — 编译 Go 二进制（静态链接，`CGO_ENABLED=0`）
+- **frontend-builder 阶段**：`node:20-alpine` — 安装前端依赖并构建静态资源
+- **backend-builder 阶段**：`golang:1.25-alpine` — 编译 Go 二进制（静态链接，`CGO_ENABLED=0`）
 - **runtime 阶段**：`ubuntu:24.04` — 通过 `apt` 安装 `ffmpeg`，从 GitHub Release 下载 `yt-dlp` 静态二进制
 - 以非 root 用户运行，包含 `HEALTHCHECK`
 - 持久化数据目录（视频文件、数据库）通过 Volume 挂载至 `/data`
@@ -577,9 +556,16 @@ GET /api/capabilities
   "ffprobe": true,
   "ytdlp": false,
   "aria2": false,
+  "tools": {
+    "ffmpeg": {"available": true, "version": "ffmpeg version ..."},
+    "ffprobe": {"available": true, "version": "ffprobe version ..."},
+    "ytdlp": {"available": false, "error": "yt-dlp not found"},
+    "aria2": {"available": false, "error": "aria2c not found"}
+  },
   "features": {
     "hls_download": true,
     "poster_generation": true,
+    "metadata_extract": true,
     "ytdlp_import": false,
     "magnet_download": false
   }
@@ -594,10 +580,10 @@ GET /api/capabilities
 | M0 — 存储接口层 | Interface 定义完成；SQLite + 内存实现通过接口一致性测试 |
 | M1 — 基础框架 | Go 服务启动、账号密码登录与 JWT 可用（SQLite 存用户）；工具可用性检查集成 |
 | M2 — 房间核心 | 房间创建/加入、WebSocket 连接、播放同步基本可用（内存 PubSub）|
-| M3 — 前端集成 | 基础 Vue 页面与 WebSocket 控制已接入；真实播放器、队列管理与管理后台仍待完善 |
+| M3 — 前端集成 | 基础 Vue 页面、WebSocket 控制、真实播放器、队列管理与管理后台基础交互已接入 |
 | M4 — 下载系统 | 后端下载任务队列、m3u8/mp4/yt-dlp/aria2 路径已接入（工具缺失时优雅降级）|
-| M5 — 视频库 | 后端元数据提取、海报生成、查询接口已接入；前端视频库页面仍待完善 |
-| M6 — CI/CD | GitHub Actions CI（lint + test）与 CD（Docker 多平台镜像推送）完整流水线 |
+| M5 — 视频库 | 后端元数据提取、海报生成、查询接口、视频选择与管理基础交互已接入 |
+| M6 — CI/CD | GitHub Actions CI（Go 测试 + 前端构建）与 CD（Docker 多平台镜像推送）完整流水线 |
 | M7 — 生产化 | 切换至 PostgreSQL + Redis 实现，多实例部署测试，性能调优 |
 
 ---
@@ -606,7 +592,7 @@ GET /api/capabilities
 
 ### 开发环境（最低配置，2c2g 可运行）
 
-- Go 1.22+
+- Go 1.25+
 - Node.js 20+
 - FFmpeg 6+（含 ffprobe）
 - yt-dlp（管理员下载功能需要）
