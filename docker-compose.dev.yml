@@ -1,0 +1,23 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      ADDR: ":8080"
+      STORAGE_BACKEND: sqlite
+      SQLITE_PATH: /data/watchtogether.db
+      CACHE_BACKEND: memory
+      JWT_SECRET: dev-change-me
+      STORAGE_DIR: /data/videos
+      POSTER_DIR: /data/posters
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - watchtogether-dev-data:/data
+
+volumes:
+  watchtogether-dev-data:

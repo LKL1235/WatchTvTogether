@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-watchtogether}
+      POSTGRES_USER: ${POSTGRES_USER:-watchtogether}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-watchtogether}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: ${APP_IMAGE:-ghcr.io/example/watchtogether:latest}
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ADDR: ":8080"
+      STORAGE_BACKEND: postgres
+      POSTGRES_DSN: postgres://${POSTGRES_USER:-watchtogether}:${POSTGRES_PASSWORD:-watchtogether}@postgres:5432/${POSTGRES_DB:-watchtogether}?sslmode=disable
+      CACHE_BACKEND: redis
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      STORAGE_DIR: /data/videos
+      POSTER_DIR: /data/posters
+      DOWNLOAD_WORKERS: ${DOWNLOAD_WORKERS:-2}
+      ARIA2_RPC_URL: ${ARIA2_RPC_URL:-http://aria2:6800/jsonrpc}
+      ARIA2_SECRET: ${ARIA2_SECRET:-}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      - app-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  app-data:
+  postgres-data:
+  redis-data:
