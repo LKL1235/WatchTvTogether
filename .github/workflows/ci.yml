@@ -65,10 +65,10 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
-      - name: Build linux/amd64 backend
+      - name: Build linux/amd64 (x86_64) backend
         run: |
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/watchtogether-linux-amd64 ./cmd/server
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -ldflags="-s -w" -o dist/watchtogether-linux-amd64 ./cmd/server
 
       - name: Upload backend binary artifact
         uses: actions/upload-artifact@v4
