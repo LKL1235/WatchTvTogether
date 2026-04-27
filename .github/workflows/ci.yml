@@ -48,3 +48,31 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+  build-backend-linux-amd64:
+    name: Build Go backend (linux/amd64)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Build linux/amd64 backend
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o dist/watchtogether-linux-amd64 ./cmd/server
+
+      - name: Upload backend binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: watchtogether-linux-amd64
+          path: dist/watchtogether-linux-amd64
+          if-no-files-found: error
