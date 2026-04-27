@@ -446,17 +446,172 @@ watchtogether/
 
 ---
 
+## CI/CD 与容器化部署
+
+### 设计目标
+
+- 代码推送到 `main` 分支或合并 PR 时自动触发 CI 流水线（编译 + 单元测试 + lint）
+- 打 Tag（`v*`）时自动触发 CD 流水线，构建多平台 Docker 镜像并推送到镜像仓库（GitHub Container Registry / Docker Hub）
+- 生产部署使用 Docker Compose，确保 FFmpeg 与 yt-dlp 在容器内可用
+
+### GitHub Actions 工作流
+
+```
+.github/
+└── workflows/
+    ├── ci.yml    # CI：push/PR → golangci-lint + go test
+    └── cd.yml    # CD：tag v* → docker buildx + push to GHCR
+```
+
+#### CI 流水线（`ci.yml`）
+
+触发条件：
+- `push` 到 `main` 分支
+- 任意 `pull_request` 到 `main` 分支
+
+步骤：
+1. `actions/checkout`
+2. `actions/setup-go`（Go 1.22）
+3. `golangci-lint-action`（代码风格与静态分析）
+4. `go test ./...`（单元测试 + 接口一致性测试）
+
+#### CD 流水线（`cd.yml`）
+
+触发条件：
+- 推送符合 `v*.*.*` 格式的 Git Tag
+
+步骤：
+1. `actions/checkout`
+2. `docker/setup-buildx-action`（多平台构建 `linux/amd64,linux/arm64`）
+3. `docker/login-action`（登录 GHCR，Secret：`GITHUB_TOKEN`）
+4. `docker/build-push-action`（构建镜像并推送，Tag 格式：`ghcr.io/<owner>/<repo>:<version>`）
+
+所需 Repository Secret：
+| Secret 名称 | 用途 |
+|-------------|------|
+| `GITHUB_TOKEN` | 推送镜像到 GHCR（GitHub 自动注入，无需手动配置）|
+| `DOCKERHUB_USERNAME` | （可选）推送到 Docker Hub |
+| `DOCKERHUB_TOKEN` | （可选）Docker Hub Access Token |
+
+### Docker 镜像设计（多阶段构建）
+
+`Dockerfile` 采用两阶段构建：
+
+1. **builder 阶段**：使用 `golang:1.22-alpine` 编译 Go 二进制
+2. **runtime 阶段**：使用 `ubuntu:24.04` 作为运行基础镜像，安装 `ffmpeg` 并下载 `yt-dlp`，将编译产物复制进来
+
+选用 Ubuntu 而非 Alpine 作为运行时镜像的原因：FFmpeg 的编解码器完整性在 Ubuntu 官方源中更有保障，且 yt-dlp 的 Python 依赖生态更完善。
+
+```dockerfile
+# 参见根目录 Dockerfile
+```
+
+### Docker Compose 部署
+
+提供两个 Compose 配置：
+
+| 文件 | 用途 |
+|------|------|
+| `docker-compose.yml` | 生产环境（PostgreSQL + Redis + App） |
+| `docker-compose.dev.yml` | 开发环境（SQLite + 内存缓存，无需外部服务） |
+
+#### 快速启动（开发模式）
+
+```bash
+docker compose -f docker-compose.dev.yml up
+```
+
+#### 快速启动（生产模式）
+
+```bash
+# 1. 复制并修改环境变量文件
+cp .env.example .env
+
+# 2. 启动全部服务
+docker compose up -d
+
+# 3. 查看日志
+docker compose logs -f app
+```
+
+---
+
+## 工具可用性检查（Graceful Degradation）
+
+### 设计原则
+
+服务启动时检查本地系统工具是否可用，若工具缺失则**禁用对应功能而非启动失败**，实现优雅降级：
+
+| 工具 | 依赖功能 | 缺失时行为 |
+|------|----------|-----------|
+| `ffmpeg` | m3u8 HLS 流合并为 mp4、关键帧海报生成 | 禁用 HLS 下载功能与海报生成；视频可正常播放但无封面 |
+| `ffprobe` | 视频时长/格式/分辨率元数据提取 | 禁用自动元数据提取；手动上传视频需由用户填写元数据 |
+| `yt-dlp` | YouTube / Bilibili 等站点视频下载 | 禁用从 yt-dlp 支持站点导入的功能；直链和 m3u8 下载不受影响 |
+| `aria2c` | 磁力链接 / BT 种子下载 | 禁用磁力链接下载功能 |
+
+### Go 实现方案
+
+```go
+// pkg/ffmpeg/ffmpeg.go
+// 启动时调用 CheckAvailability()，返回 Capabilities 结构体
+type Capabilities struct {
+    FFmpegAvailable  bool   // ffmpeg 是否可用
+    FFprobeAvailable bool   // ffprobe 是否可用
+    FFmpegVersion    string // ffmpeg 版本号（可用时填充）
+}
+
+func CheckAvailability() Capabilities { ... }
+
+// pkg/ytdlp/ytdlp.go
+type Capabilities struct {
+    Available bool   // yt-dlp 是否可用
+    Version   string // 版本号（可用时填充）
+}
+
+func CheckAvailability() Capabilities { ... }
+```
+
+检测方法：使用 `exec.LookPath("ffmpeg")` 检查工具是否在系统 PATH 中，然后执行 `ffmpeg -version` 获取版本号，以双重确认工具确实可用。
+
+### API 能力暴露接口
+
+服务提供接口供前端查询当前可用功能，前端据此动态禁用对应 UI 入口：
+
+```
+GET /api/capabilities
+```
+
+响应示例：
+
+```json
+{
+  "ffmpeg": true,
+  "ffprobe": true,
+  "ytdlp": false,
+  "aria2": false,
+  "features": {
+    "hls_download": true,
+    "poster_generation": true,
+    "ytdlp_import": false,
+    "magnet_download": false
+  }
+}
+```
+
+---
+
 ## 里程碑（Milestone）
 
 | 阶段 | 核心交付物 |
 |------|-----------|
 | M0 — 存储接口层 | Interface 定义完成；SQLite + 内存实现通过接口一致性测试 |
-| M1 — 基础框架 | Go 服务启动、OAuth 登录可用（SQLite 存用户）|
+| M1 — 基础框架 | Go 服务启动、OAuth 登录可用（SQLite 存用户）；工具可用性检查集成 |
 | M2 — 房间核心 | 房间创建/加入、WebSocket 连接、播放同步基本可用（内存 PubSub）|
-| M3 — 前端集成 | Vue 播放器页面、控制栏权限、队列管理 UI |
-| M4 — 下载系统 | 下载任务队列、m3u8/mp4/yt-dlp/aria2 全格式支持 |
+| M3 — 前端集成 | Vue 播放器页面、控制栏权限、队列管理 UI；前端动态禁用不可用功能 |
+| M4 — 下载系统 | 下载任务队列、m3u8/mp4/yt-dlp/aria2 全格式支持（工具缺失时优雅降级）|
 | M5 — 视频库 | 元数据提取、海报生成、查询接口、前端视频库页面 |
-| M6 — 生产化 | 切换至 PostgreSQL + Redis 实现，多实例部署测试，性能调优 |
+| M6 — CI/CD | GitHub Actions CI（lint + test）与 CD（Docker 多平台镜像推送）完整流水线 |
+| M7 — 生产化 | 切换至 PostgreSQL + Redis 实现，多实例部署测试，性能调优 |
 
 ---
 
@@ -477,6 +632,20 @@ watchtogether/
 - PostgreSQL 15+
 - Redis 7+
 - 切换方式：设置环境变量 `STORAGE_BACKEND=postgres` + `CACHE_BACKEND=redis` 并配置对应 DSN/地址
+
+### 使用 Docker（推荐生产部署方式）
+
+无需手动安装 Go、FFmpeg、yt-dlp 等，Docker 镜像已内置所有依赖：
+
+```bash
+# 拉取最新镜像
+docker pull ghcr.io/<owner>/watchtogether:latest
+
+# 使用 Docker Compose 一键部署（含 PostgreSQL + Redis）
+docker compose up -d
+```
+
+> 注意：`STORAGE_BACKEND` 和 `CACHE_BACKEND` 等配置通过环境变量或挂载 `config.yaml` 传入容器。
 
 ### 配置示例（`config.yaml`）
 

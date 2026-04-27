@@ -1,0 +1,34 @@
+version: "3.9"
+
+# ─── 开发环境 Docker Compose ───────────────────────────────────────────────────
+# 仅启动 WatchTogether 应用，使用 SQLite + 内存缓存，无需外部服务。
+#
+# 快速启动：
+#   docker compose -f docker-compose.dev.yml up
+#
+# 注意：此配置仅用于本地开发验证容器行为，
+#       日常开发建议直接 go run ./cmd/server，无需 Docker。
+
+services:
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    environment:
+      STORAGE_BACKEND: sqlite
+      CACHE_BACKEND: memory
+      SQLITE_PATH: /data/watchtogether.db
+      JWT_SECRET: dev-secret-do-not-use-in-prod
+      JWT_ACCESS_TTL: 15m
+      JWT_REFRESH_TTL: 168h
+      STORAGE_DIR: /data/videos
+      ADDR: ":8080"
+    volumes:
+      - dev_data:/data
+    ports:
+      - "8080:8080"
+
+volumes:
+  dev_data:

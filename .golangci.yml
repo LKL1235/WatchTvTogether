@@ -1,0 +1,23 @@
+version: "2"
+
+linters:
+  enable:
+    - gofmt
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - misspell
+
+linters-settings:
+  govet:
+    enable-all: true
+
+issues:
+  exclude-rules:
+    # 测试文件放宽 errcheck（测试中 t.Fatal 已处理错误）
+    - path: "_test\\.go"
+      linters:
+        - errcheck
