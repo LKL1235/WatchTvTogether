@@ -176,6 +176,29 @@ func main() {
 
 ---
 
+## 当前完成度快照
+
+### 已完成 / 已接入
+
+- M0：Store / Cache Interface、SQLite 存储、内存缓存、接口一致性测试已完成。
+- M1：Gin 服务框架、配置加载、健康检查、静态文件服务、注册登录、JWT / RBAC 已完成。
+- M2：房间 CRUD、WebSocket 房间同步、房间状态快照、心跳与 Hub 清理已完成。
+- M4/M5 后端主体：下载任务队列、直链 / HLS / yt-dlp / aria2 下载路径、下载进度推送、下载后入库、视频查询 / 删除 / Range 播放已接入。
+- 工具能力检测：`ffmpeg`、`ffprobe`、`yt-dlp`、`aria2c` 启动检测与 `GET /api/capabilities` 已接入。
+
+### 部分完成
+
+- M3 前端：登录 / 注册、大厅、创建房间、房间同步控制的基础 UI 已完成；真实播放器、拖拽队列、视频库选择与完整管理员后台仍是占位或简化实现。
+- M4/M5 媒体处理：视频元数据与海报提取已接入下载完成流程；实际能力取决于运行环境中的 `ffprobe` / `ffmpeg` 可用性。
+
+### 待完成
+
+- PostgreSQL Store、Redis Cache、数据库迁移脚本。
+- 完整前端视频库 / 下载管理 / 管理员后台交互。
+- Dockerfile、Docker Compose、GitHub Actions CI/CD。
+
+---
+
 ## TODO / 开发计划
 
 ### 阶段 0：存储接口层（**优先完成，是其他所有任务的地基**）
@@ -311,12 +334,12 @@ GET       /api/rooms/:roomId/state   → 房间播放状态快照（初次加入
 - [x] **登录 / 注册页**：账号密码注册与登录
 - [x] **首页/大厅**：展示公开房间列表，支持创建房间
 - [x] **房间创建弹窗**：房间名、公开/私有、可选密码
-- [x] **房间页**（核心）：
-  - 视频播放器（HLS.js 支持 m3u8，Video.js 支持 mp4）
-  - 播放控制栏（仅房主/admin 可操作：播放/暂停/拖进度/切换视频）
-  - 视频队列面板（房主可拖拽排序、删除、添加 URL 或从视频库选择）
-  - 在线成员列表（头像/昵称，房主可踢出）
-- [x] **管理员后台**：用户管理、视频库管理、房间监控
+- [ ] **房间页**（核心，部分完成）：
+  - [ ] 真实视频播放器（HLS.js / Video.js）接入
+  - [x] 播放控制栏权限控制：房主/admin 可操作，普通成员只读
+  - [ ] 视频队列拖拽排序、删除、添加 URL 或从视频库选择
+  - [ ] 在线成员列表基础展示已完成；踢出交互仍待接入后端调用
+- [ ] **管理员后台**：当前为入口占位，用户管理、视频库管理、房间监控详情待接入
 - [x] WebSocket 连接管理（composable `useRoomSocket`）：
   - 接收 `sync` 消息后同步本地播放器进度
   - 普通成员播放器控制栏置为禁用只读
@@ -347,14 +370,14 @@ DELETE /api/admin/downloads/:taskId   → 取消下载任务
 
 #### 开发任务
 
-- [ ] 下载任务队列（Go channel + goroutine worker pool），任务状态持久化到 `DownloadTaskStore`
-- [ ] mp4/mkv 等直链下载，支持进度上报（Content-Length + 已下载字节数）
-- [ ] m3u8 下载：调用 FFmpeg 合并 HLS 流为 mp4
-- [ ] yt-dlp 集成（`pkg/ytdlp/`）：exec 调用，解析 stdout 进度输出
-- [ ] aria2 RPC 集成（`pkg/aria2/`）：提交磁力链接，轮询进度
-- [ ] 下载完成后自动触发元数据提取（见阶段 6）
-- [ ] 任务状态实时推送（复用 WebSocket 管理频道）
-- [ ] 文件存储路径规划（按日期/ID 分目录）
+- [x] 下载任务队列（Go channel + goroutine worker pool），任务状态持久化到 `DownloadTaskStore`
+- [x] mp4/mkv 等直链下载，支持进度上报（Content-Length + 已下载字节数）
+- [x] m3u8 下载：调用 FFmpeg 合并 HLS 流为 mp4
+- [x] yt-dlp 集成（`pkg/ytdlp/`）：exec 调用，解析 stdout 进度输出
+- [x] aria2 RPC 集成：提交磁力链接，轮询进度（依赖外部 aria2 RPC 服务）
+- [x] 下载完成后自动触发元数据提取（见阶段 6）
+- [x] 任务状态实时推送（复用 WebSocket 管理频道 `/ws/admin/downloads`）
+- [x] 文件存储路径规划（按日期 + 任务 ID 命名）
 
 ---
 
@@ -395,11 +418,11 @@ GET    /static/videos/:path     → 视频文件直链（支持 Range 请求）
 
 #### 开发任务
 
-- [ ] `pkg/ffmpeg/` 封装：`ffprobe` 提取时长/分辨率/编码格式
-- [ ] `pkg/ffmpeg/` 封装：关键帧提取生成海报
-- [ ] 视频列表查询接口（分页 + 关键词，调用 `VideoStore`）
-- [ ] 视频文件 Range 请求支持（`bytes=` Header，支持拖进度播放）
-- [ ] 视频删除接口（同时清理文件与数据库记录）
+- [x] `pkg/ffmpeg/` 封装：`ffprobe` 提取时长与格式
+- [x] `pkg/ffmpeg/` 封装：关键帧提取生成海报
+- [x] 视频列表查询接口（分页 + 关键词，调用 `VideoStore`）
+- [x] 视频文件 Range 请求支持（静态文件服务支持 `bytes=` Header，另提供 `/api/videos/:id/file`）
+- [x] 视频删除接口（同时清理文件与数据库记录）
 
 ---
 
@@ -512,7 +535,7 @@ watchtogether/
 
 ## 工具可用性检查（Graceful Degradation）
 
-> **待实现**：本节描述工具检查逻辑的需求规格，具体代码将在 M1 阶段与服务框架一同落地。
+> **已接入**：服务启动时检测本地工具并生成能力报告；缺失工具只会关闭对应功能，不影响服务启动。
 
 ### 需求目标
 
@@ -527,21 +550,21 @@ watchtogether/
 | `yt-dlp` | YouTube / Bilibili 等站点视频下载 | 禁用从上述站点导入功能；直链和 m3u8 下载不受影响 |
 | `aria2c` | 磁力链接 / BT 种子下载 | 禁用磁力链接下载 |
 
-### Go 实现需求
+### Go 实现状态
 
-- 在 `pkg/ffmpeg/`、`pkg/ytdlp/`、`pkg/aria2/` 各包中实现 `CheckAvailability()` 函数
-- 检测方式：`exec.LookPath` 确认工具在 PATH 中，再执行 `--version` 命令双重确认可运行
-- 函数须设有超时（5–10 秒），不阻塞服务启动
-- 在 `internal/capabilities/` 汇总所有检测结果，推导功能开关，并在启动日志中打印摘要
+- [x] 在 `pkg/ffmpeg/`、`pkg/ytdlp/`、`pkg/aria2/` 各包中实现 `CheckAvailability()` 函数
+- [x] 检测方式：`exec.LookPath` 确认工具在 PATH 中，再执行 `--version` 命令双重确认可运行
+- [x] 函数设有超时（默认 5 秒，汇总检测整体 10 秒），不阻塞服务启动
+- [x] 在 `internal/capabilities/` 汇总所有检测结果，推导功能开关，并在启动日志中打印摘要
 - 开发任务：
-  - [ ] `pkg/ffmpeg/` — 检测 `ffmpeg` / `ffprobe` 可用性，返回版本信息
-  - [ ] `pkg/ytdlp/` — 检测 `yt-dlp` 可用性，返回版本信息
-  - [ ] `pkg/aria2/` — 检测 `aria2c` 可用性，返回版本信息
-  - [ ] `internal/capabilities/` — 汇总检测结果，推导功能开关，打印启动日志
+  - [x] `pkg/ffmpeg/` — 检测 `ffmpeg` / `ffprobe` 可用性，返回版本信息
+  - [x] `pkg/ytdlp/` — 检测 `yt-dlp` 可用性，返回版本信息
+  - [x] `pkg/aria2/` — 检测 `aria2c` 可用性，返回版本信息
+  - [x] `internal/capabilities/` — 汇总检测结果，推导功能开关，打印启动日志
 
 ### API 能力暴露接口需求
 
-提供接口供前端查询当前可用功能，前端据此动态禁用对应 UI 入口：
+提供接口供前端查询当前可用功能。后端接口已接入，前端动态禁用对应 UI 入口仍待完善：
 
 ```
 GET /api/capabilities
@@ -572,9 +595,9 @@ GET /api/capabilities
 | M0 — 存储接口层 | Interface 定义完成；SQLite + 内存实现通过接口一致性测试 |
 | M1 — 基础框架 | Go 服务启动、账号密码登录与 JWT 可用（SQLite 存用户）；工具可用性检查集成 |
 | M2 — 房间核心 | 房间创建/加入、WebSocket 连接、播放同步基本可用（内存 PubSub）|
-| M3 — 前端集成 | Vue 播放器页面、控制栏权限、队列管理 UI；前端动态禁用不可用功能 |
-| M4 — 下载系统 | 下载任务队列、m3u8/mp4/yt-dlp/aria2 全格式支持（工具缺失时优雅降级）|
-| M5 — 视频库 | 元数据提取、海报生成、查询接口、前端视频库页面 |
+| M3 — 前端集成 | 基础 Vue 页面与 WebSocket 控制已接入；真实播放器、队列管理与管理后台仍待完善 |
+| M4 — 下载系统 | 后端下载任务队列、m3u8/mp4/yt-dlp/aria2 路径已接入（工具缺失时优雅降级）|
+| M5 — 视频库 | 后端元数据提取、海报生成、查询接口已接入；前端视频库页面仍待完善 |
 | M6 — CI/CD | GitHub Actions CI（lint + test）与 CD（Docker 多平台镜像推送）完整流水线 |
 | M7 — 生产化 | 切换至 PostgreSQL + Redis 实现，多实例部署测试，性能调优 |
 
@@ -598,19 +621,9 @@ GET /api/capabilities
 - Redis 7+
 - 切换方式：设置环境变量 `STORAGE_BACKEND=postgres` + `CACHE_BACKEND=redis` 并配置对应 DSN/地址
 
-### 使用 Docker（推荐生产部署方式）
+### 使用 Docker（规划中）
 
-无需手动安装 Go、FFmpeg、yt-dlp 等，Docker 镜像已内置所有依赖：
-
-```bash
-# 拉取最新镜像
-docker pull ghcr.io/<owner>/watchtogether:latest
-
-# 使用 Docker Compose 一键部署（含 PostgreSQL + Redis）
-docker compose up -d
-```
-
-> 注意：`STORAGE_BACKEND` 和 `CACHE_BACKEND` 等配置通过环境变量或挂载 `config.yaml` 传入容器。
+Dockerfile 与 Compose 文件尚未落地。规划中的生产镜像将内置 Go 编译产物、FFmpeg 与 yt-dlp，并通过环境变量或挂载 `config.yaml` 注入 `STORAGE_BACKEND`、`CACHE_BACKEND` 等配置。
 
 ### 配置示例（`config.yaml`）
 
