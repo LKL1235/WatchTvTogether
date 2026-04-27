@@ -45,6 +45,7 @@ type VideoStore interface {
 	Create(ctx context.Context, video *model.Video) error
 	GetByID(ctx context.Context, id string) (*model.Video, error)
 	List(ctx context.Context, opts ListVideosOpts) ([]*model.Video, int, error)
+	Update(ctx context.Context, video *model.Video) error
 	UpdateStatus(ctx context.Context, id string, status model.VideoStatus) error
 	Delete(ctx context.Context, id string) error
 }
@@ -54,5 +55,6 @@ type DownloadTaskStore interface {
 	GetByID(ctx context.Context, id string) (*model.DownloadTask, error)
 	List(ctx context.Context) ([]*model.DownloadTask, error)
 	UpdateProgress(ctx context.Context, id string, progress float64, status model.DownloadTaskStatus) error
+	UpdateResult(ctx context.Context, task *model.DownloadTask) error
 	Delete(ctx context.Context, id string) error
 }

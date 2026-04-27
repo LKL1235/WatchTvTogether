@@ -32,6 +32,9 @@ type Config struct {
 	JWTRefreshTTLRaw string        `yaml:"jwt_refresh_ttl"`
 	StorageDir       string        `yaml:"storage_dir"`
 	PosterDir        string        `yaml:"poster_dir"`
+	DownloadWorkers  int           `yaml:"download_workers"`
+	Aria2RPCURL      string        `yaml:"aria2_rpc_url"`
+	Aria2Secret      string        `yaml:"aria2_secret"`
 }
 
 func Default() Config {
@@ -47,6 +50,8 @@ func Default() Config {
 		JWTRefreshTTLRaw: "168h",
 		StorageDir:       "./data/videos",
 		PosterDir:        "./data/posters",
+		DownloadWorkers:  2,
+		Aria2RPCURL:      "http://localhost:6800/jsonrpc",
 	}
 }
 
@@ -90,11 +95,22 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.JWTRefreshTTLRaw, "JWT_REFRESH_TTL")
 	setString(&cfg.StorageDir, "STORAGE_DIR")
 	setString(&cfg.PosterDir, "POSTER_DIR")
+	setInt(&cfg.DownloadWorkers, "DOWNLOAD_WORKERS")
+	setString(&cfg.Aria2RPCURL, "ARIA2_RPC_URL")
+	setString(&cfg.Aria2Secret, "ARIA2_SECRET")
 }
 
 func setString(target *string, key string) {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		*target = v
+	}
+}
+
+func setInt(target *int, key string) {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			*target = parsed
+		}
 	}
 }
 
@@ -121,6 +137,9 @@ func (c *Config) normalize() error {
 	}
 	c.JWTAccessTTL = accessTTL
 	c.JWTRefreshTTL = refreshTTL
+	if c.DownloadWorkers <= 0 {
+		c.DownloadWorkers = 2
+	}
 	return nil
 }
 
