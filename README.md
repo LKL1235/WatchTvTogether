@@ -33,6 +33,36 @@ docker compose up -d --build
 
 默认在 `http://localhost:8080` 访问；宿主机端口可通过环境变量 `APP_PORT` 等调整，详见各 Compose 文件。
 
+### 方式三：独立二进制（Release）+ `config.yaml`
+
+从本仓库 **Releases** 页面下载 Linux amd64 产物并解压后，将仓库根目录的 `config.yaml` 复制到**你准备启动服务的目录**（或按需编辑后保存为该文件名）。
+
+1. **配置文件路径**：服务端固定从当前工作目录读取名为 `config.yaml` 的文件（见 `cmd/server/main.go` 中的 `config.Load("config.yaml")`）。**不是**可执行文件所在目录；请在含有 `config.yaml` 的目录下执行二进制，例如：
+   ```bash
+   cd /opt/watchtogether
+   ./watchtogether-linux-amd64
+   ```
+2. **缺少文件时**：若当前目录没有 `config.yaml`，程序不会报错，会先使用内置默认值，再应用下面列出的环境变量覆盖。
+3. **敏感配置**：生产环境务必修改 `jwt_secret`，并按需设置 `storage_backend` / `cache_backend` 及数据库、Redis 等字段。
+
+**环境变量覆盖**（仅当变量非空时生效，覆盖 `config.yaml` 或默认值）：
+
+| 环境变量 | 说明 |
+|----------|------|
+| `ADDR` | 监听地址（如 `:8080`） |
+| `STORAGE_BACKEND` | `sqlite` 或 `postgres` |
+| `SQLITE_PATH` | SQLite 数据库文件路径 |
+| `POSTGRES_DSN` | PostgreSQL 连接串 |
+| `CACHE_BACKEND` | `memory` 或 `redis` |
+| `REDIS_ADDR` | Redis 地址 |
+| `JWT_SECRET` | JWT 密钥 |
+| `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` | Access / Refresh 有效期 |
+| `STORAGE_DIR` / `POSTER_DIR` | 视频与海报目录 |
+| `DOWNLOAD_WORKERS` | 下载并发数 |
+| `ARIA2_RPC_URL` / `ARIA2_SECRET` | aria2 JSON-RPC |
+
+完整字段说明与示例见下文「配置示例（`config.yaml`）」。
+
 ---
 
 ## 技术栈概览
