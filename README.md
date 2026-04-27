@@ -1,6 +1,6 @@
 # 🎬 WatchTogether — 同步视频观看平台
 
-> 基于 Go 后端 + Vue 前端的多人同步视频观看服务，支持 m3u8/mp4 等格式、房间管理、OAuth 鉴权、服务器视频缓存与下载。
+> 基于 Go 后端 + Vue 前端的多人同步视频观看服务，支持 m3u8/mp4 等格式、房间管理、账号密码注册与登录、JWT 鉴权、服务器视频缓存与下载。
 > 单体 Go 应用，接口分层设计，存储后端可替换（开发阶段使用 SQLite + 内存，生产可无缝切换至 PostgreSQL + Redis）。
 
 ---
@@ -11,7 +11,7 @@
 |------|----------|
 | 后端 | Go（Gin）、WebSocket（gorilla/websocket）、FFmpeg、yt-dlp / aria2 |
 | 前端 | Vue 3 + Vite、Pinia、HLS.js / Video.js |
-| 鉴权 | OAuth 2.0（GitHub / Google 等第三方）+ JWT |
+| 鉴权 | 账号密码（注册/登录）+ JWT（Access / Refresh）|
 | 数据库（开发）| SQLite（用户/房间/视频元数据）|
 | 缓存（开发）| 内存 Map（房间状态/会话/Pub/Sub）|
 | 数据库（生产）| PostgreSQL 15+（替换 SQLite，接口不变）|
@@ -46,7 +46,7 @@ internal/
 
 type UserStore interface {
     GetByID(ctx context.Context, id string) (*model.User, error)
-    GetByProviderID(ctx context.Context, provider, providerID string) (*model.User, error)
+    GetByUsername(ctx context.Context, username string) (*model.User, error)
     Create(ctx context.Context, user *model.User) error
     Update(ctx context.Context, user *model.User) error
 }
@@ -229,30 +229,30 @@ func main() {
 
 ---
 
-### 阶段 2：用户 OAuth 鉴权系统
+### 阶段 2：用户鉴权系统（注册 / 登录 + JWT）
 
-**目标**：接入第三方 OAuth 2.0 登录，区分管理员与普通用户权限。
+**目标**：通过账号密码完成注册与登录，签发与校验 JWT，区分管理员与普通用户权限。
 
 #### 功能清单
 
-- [ ] 接入 OAuth 2.0 Provider（GitHub / Google，可配置）
-- [ ] OAuth 回调处理，生成 JWT（Access Token + Refresh Token）
+- [ ] 用户注册：用户名、密码（bcrypt/argon2 等安全哈希存储，不明文存库）
+- [ ] 用户登录：校验密码后生成 JWT（Access Token + Refresh Token）
 - [ ] 用户角色体系：
   - `admin`：全部管理权限（用户管理、全局视频库、强制销毁任意房间）
   - `user`：可创建房间，在自己房间内行使房主权限
 - [ ] JWT 中间件鉴权，路由级别 RBAC 权限控制
-- [ ] 用户信息存储（头像、昵称、绑定账号）—— 调用 `UserStore`
+- [ ] 用户信息存储（昵称、头像等可选字段）—— 调用 `UserStore`
 - [ ] Token 刷新接口，调用 `SessionCache.SetRefreshToken`
 - [ ] 登出接口，调用 `SessionCache.BlacklistToken`（JWT 黑名单）
 
 #### 接口设计
 
 ```
-GET  /api/auth/login/:provider     → 跳转 OAuth 授权页
-GET  /api/auth/callback/:provider  → OAuth 回调，返回 JWT
-POST /api/auth/refresh             → 刷新 Token
-POST /api/auth/logout              → 登出
-GET  /api/users/me                 → 获取当前用户信息
+POST /api/auth/register    → 注册
+POST /api/auth/login       → 登录，返回 JWT
+POST /api/auth/refresh     → 刷新 Token
+POST /api/auth/logout      → 登出
+GET  /api/users/me         → 获取当前用户信息
 ```
 
 #### 权限矩阵
@@ -308,7 +308,7 @@ GET       /api/rooms/:roomId/state   → 房间播放状态快照（初次加入
 
 #### 页面/组件清单
 
-- [ ] **登录页**：OAuth 登录入口
+- [ ] **登录 / 注册页**：账号密码注册与登录
 - [ ] **首页/大厅**：展示公开房间列表，支持创建房间
 - [ ] **房间创建弹窗**：房间名、公开/私有、可选密码
 - [ ] **房间页**（核心）：
@@ -424,7 +424,7 @@ watchtogether/
 │   │   └── redis/            # Redis 实现（生产）
 │   ├── service/              # 业务逻辑层（只依赖 Interface，不依赖具体实现）
 │   ├── api/                  # HTTP Handler + 路由注册
-│   ├── auth/                 # OAuth + JWT 逻辑
+│   ├── auth/                 # 注册/登录、密码哈希、JWT 签发与校验
 │   ├── room/                 # WebSocket Hub + 房间管理
 │   ├── download/             # 下载任务队列
 │   └── middleware/           # Gin 中间件（日志、鉴权、RBAC）
@@ -570,7 +570,7 @@ GET /api/capabilities
 | 阶段 | 核心交付物 |
 |------|-----------|
 | M0 — 存储接口层 | Interface 定义完成；SQLite + 内存实现通过接口一致性测试 |
-| M1 — 基础框架 | Go 服务启动、OAuth 登录可用（SQLite 存用户）；工具可用性检查集成 |
+| M1 — 基础框架 | Go 服务启动、账号密码登录与 JWT 可用（SQLite 存用户）；工具可用性检查集成 |
 | M2 — 房间核心 | 房间创建/加入、WebSocket 连接、播放同步基本可用（内存 PubSub）|
 | M3 — 前端集成 | Vue 播放器页面、控制栏权限、队列管理 UI；前端动态禁用不可用功能 |
 | M4 — 下载系统 | 下载任务队列、m3u8/mp4/yt-dlp/aria2 全格式支持（工具缺失时优雅降级）|
@@ -630,15 +630,6 @@ redis_addr: "localhost:6379"
 jwt_secret: "change-me-in-production"
 jwt_access_ttl: "15m"
 jwt_refresh_ttl: "7d"
-
-# OAuth
-oauth:
-  github:
-    client_id: ""
-    client_secret: ""
-  google:
-    client_id: ""
-    client_secret: ""
 
 # 文件存储
 storage_dir: "./data/videos"
