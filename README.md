@@ -448,140 +448,106 @@ watchtogether/
 
 ## CI/CD 与容器化部署
 
-### 设计目标
+> **待实现**：本节描述 CI/CD 与容器化部署的需求规格，具体工作流文件与 Dockerfile 将在 M6 阶段落地。
 
-- 代码推送到 `main` 分支或合并 PR 时自动触发 CI 流水线（编译 + 单元测试 + lint）
-- 打 Tag（`v*`）时自动触发 CD 流水线，构建多平台 Docker 镜像并推送到镜像仓库（GitHub Container Registry / Docker Hub）
-- 生产部署使用 Docker Compose，确保 FFmpeg 与 yt-dlp 在容器内可用
+### 需求目标
 
-### GitHub Actions 工作流
+- [ ] 代码推送到 `main` 分支或合并 PR 时，自动触发 CI 流水线（编译 + 单元测试 + lint）
+- [ ] 打 Tag（`v*.*.*`）时，自动触发 CD 流水线，构建多平台 Docker 镜像并推送到镜像仓库
+- [ ] 镜像仓库目标：GitHub Container Registry（GHCR），可选同步推送到 Docker Hub
+- [ ] 生产部署通过 Docker Compose 完成，镜像内需保证 `ffmpeg` 与 `yt-dlp` 可用
 
-```
-.github/
-└── workflows/
-    ├── ci.yml    # CI：push/PR → golangci-lint + go test
-    └── cd.yml    # CD：tag v* → docker buildx + push to GHCR
-```
+### CI 流水线需求（`.github/workflows/ci.yml`）
 
-#### CI 流水线（`ci.yml`）
+触发时机：`push` 到 `main` 分支 / 任意 PR 到 `main`
 
-触发条件：
-- `push` 到 `main` 分支
-- 任意 `pull_request` 到 `main` 分支
+流程步骤：
+1. 检出代码
+2. 安装 Go 1.22 工具链（含缓存）
+3. 在 CI 环境中安装 `ffmpeg`（apt）与 `yt-dlp`（静态二进制），确保工具可用分支被测试覆盖
+4. `golangci-lint`（代码风格与静态分析）
+5. `go test -race ./...`（含竞态检测）
 
-步骤：
-1. `actions/checkout`
-2. `actions/setup-go`（Go 1.22）
-3. `golangci-lint-action`（代码风格与静态分析）
-4. `go test ./...`（单元测试 + 接口一致性测试）
+### CD 流水线需求（`.github/workflows/cd.yml`）
 
-#### CD 流水线（`cd.yml`）
+触发时机：推送符合 `v*.*.*` 格式的 Git Tag
 
-触发条件：
-- 推送符合 `v*.*.*` 格式的 Git Tag
+流程步骤：
+1. 检出代码
+2. 配置 Docker Buildx（多平台：`linux/amd64` + `linux/arm64`）
+3. 登录 GHCR（使用 `GITHUB_TOKEN`，GitHub 自动注入，无需额外配置）
+4. 构建镜像并推送，镜像 Tag 自动按语义版本命名（`1.2.3` / `1.2` / `latest`）
 
-步骤：
-1. `actions/checkout`
-2. `docker/setup-buildx-action`（多平台构建 `linux/amd64,linux/arm64`）
-3. `docker/login-action`（登录 GHCR，Secret：`GITHUB_TOKEN`）
-4. `docker/build-push-action`（构建镜像并推送，Tag 格式：`ghcr.io/<owner>/<repo>:<version>`）
+可选 Secret（不配置则跳过 Docker Hub 推送）：
 
-所需 Repository Secret：
 | Secret 名称 | 用途 |
 |-------------|------|
-| `GITHUB_TOKEN` | 推送镜像到 GHCR（GitHub 自动注入，无需手动配置）|
-| `DOCKERHUB_USERNAME` | （可选）推送到 Docker Hub |
-| `DOCKERHUB_TOKEN` | （可选）Docker Hub Access Token |
+| `GITHUB_TOKEN` | 推送到 GHCR（自动注入）|
+| `DOCKERHUB_USERNAME` | 推送到 Docker Hub（可选）|
+| `DOCKERHUB_TOKEN` | Docker Hub Access Token（可选）|
 
-### Docker 镜像设计（多阶段构建）
+### Docker 镜像设计需求（`Dockerfile`）
 
-`Dockerfile` 采用两阶段构建：
+采用**多阶段构建**以减小最终镜像体积：
 
-1. **builder 阶段**：使用 `golang:1.22-alpine` 编译 Go 二进制
-2. **runtime 阶段**：使用 `ubuntu:24.04` 作为运行基础镜像，安装 `ffmpeg` 并下载 `yt-dlp`，将编译产物复制进来
+- **builder 阶段**：`golang:1.22-alpine` — 编译 Go 二进制（静态链接，`CGO_ENABLED=0`）
+- **runtime 阶段**：`ubuntu:24.04` — 通过 `apt` 安装 `ffmpeg`，从 GitHub Release 下载 `yt-dlp` 静态二进制
+- 以非 root 用户运行，包含 `HEALTHCHECK`
+- 持久化数据目录（视频文件、数据库）通过 Volume 挂载至 `/data`
 
-选用 Ubuntu 而非 Alpine 作为运行时镜像的原因：FFmpeg 的编解码器完整性在 Ubuntu 官方源中更有保障，且 yt-dlp 的 Python 依赖生态更完善。
+> 选用 Ubuntu 而非 Alpine 作为 runtime 的原因：`ffmpeg` 在 Ubuntu 官方源中编解码器更完整，`yt-dlp` 依赖生态更健全。
 
-```dockerfile
-# 参见根目录 Dockerfile
-```
+### Docker Compose 部署需求
 
-### Docker Compose 部署
+提供两个 Compose 文件：
 
-提供两个 Compose 配置：
+| 文件 | 用途 | 依赖 |
+|------|------|------|
+| `docker-compose.yml` | 生产环境 | PostgreSQL 15 + Redis 7 + App |
+| `docker-compose.dev.yml` | 开发验证容器行为 | 仅 App（SQLite + 内存缓存）|
 
-| 文件 | 用途 |
-|------|------|
-| `docker-compose.yml` | 生产环境（PostgreSQL + Redis + App） |
-| `docker-compose.dev.yml` | 开发环境（SQLite + 内存缓存，无需外部服务） |
-
-#### 快速启动（开发模式）
-
-```bash
-docker compose -f docker-compose.dev.yml up
-```
-
-#### 快速启动（生产模式）
-
-```bash
-# 1. 复制并修改环境变量文件
-cp .env.example .env
-
-# 2. 启动全部服务
-docker compose up -d
-
-# 3. 查看日志
-docker compose logs -f app
-```
+环境变量通过 `.env` 文件注入（参考 `.env.example` 模板）。
 
 ---
 
 ## 工具可用性检查（Graceful Degradation）
 
-### 设计原则
+> **待实现**：本节描述工具检查逻辑的需求规格，具体代码将在 M1 阶段与服务框架一同落地。
 
-服务启动时检查本地系统工具是否可用，若工具缺失则**禁用对应功能而非启动失败**，实现优雅降级：
+### 需求目标
+
+服务**启动时**检查本地系统工具是否可用。若工具缺失，**禁用对应功能而非启动失败**（优雅降级），确保服务在不同部署环境下均可正常运行。
+
+### 工具与功能映射
 
 | 工具 | 依赖功能 | 缺失时行为 |
 |------|----------|-----------|
-| `ffmpeg` | m3u8 HLS 流合并为 mp4、关键帧海报生成 | 禁用 HLS 下载功能与海报生成；视频可正常播放但无封面 |
-| `ffprobe` | 视频时长/格式/分辨率元数据提取 | 禁用自动元数据提取；手动上传视频需由用户填写元数据 |
-| `yt-dlp` | YouTube / Bilibili 等站点视频下载 | 禁用从 yt-dlp 支持站点导入的功能；直链和 m3u8 下载不受影响 |
-| `aria2c` | 磁力链接 / BT 种子下载 | 禁用磁力链接下载功能 |
+| `ffmpeg` | m3u8 HLS 流合并为 mp4、关键帧海报生成 | 禁用 HLS 下载与海报生成；视频可正常播放但无封面 |
+| `ffprobe` | 视频时长 / 格式 / 分辨率元数据自动提取 | 禁用自动元数据提取；用户上传时需手动填写 |
+| `yt-dlp` | YouTube / Bilibili 等站点视频下载 | 禁用从上述站点导入功能；直链和 m3u8 下载不受影响 |
+| `aria2c` | 磁力链接 / BT 种子下载 | 禁用磁力链接下载 |
 
-### Go 实现方案
+### Go 实现需求
 
-```go
-// pkg/ffmpeg/ffmpeg.go
-// 启动时调用 CheckAvailability()，返回 Capabilities 结构体
-type Capabilities struct {
-    FFmpegAvailable  bool   // ffmpeg 是否可用
-    FFprobeAvailable bool   // ffprobe 是否可用
-    FFmpegVersion    string // ffmpeg 版本号（可用时填充）
-}
+- 在 `pkg/ffmpeg/`、`pkg/ytdlp/`、`pkg/aria2/` 各包中实现 `CheckAvailability()` 函数
+- 检测方式：`exec.LookPath` 确认工具在 PATH 中，再执行 `--version` 命令双重确认可运行
+- 函数须设有超时（5–10 秒），不阻塞服务启动
+- 在 `internal/capabilities/` 汇总所有检测结果，推导功能开关，并在启动日志中打印摘要
+- 开发任务：
+  - [ ] `pkg/ffmpeg/` — 检测 `ffmpeg` / `ffprobe` 可用性，返回版本信息
+  - [ ] `pkg/ytdlp/` — 检测 `yt-dlp` 可用性，返回版本信息
+  - [ ] `pkg/aria2/` — 检测 `aria2c` 可用性，返回版本信息
+  - [ ] `internal/capabilities/` — 汇总检测结果，推导功能开关，打印启动日志
 
-func CheckAvailability() Capabilities { ... }
+### API 能力暴露接口需求
 
-// pkg/ytdlp/ytdlp.go
-type Capabilities struct {
-    Available bool   // yt-dlp 是否可用
-    Version   string // 版本号（可用时填充）
-}
-
-func CheckAvailability() Capabilities { ... }
-```
-
-检测方法：使用 `exec.LookPath("ffmpeg")` 检查工具是否在系统 PATH 中，然后执行 `ffmpeg -version` 获取版本号，以双重确认工具确实可用。
-
-### API 能力暴露接口
-
-服务提供接口供前端查询当前可用功能，前端据此动态禁用对应 UI 入口：
+提供接口供前端查询当前可用功能，前端据此动态禁用对应 UI 入口：
 
 ```
 GET /api/capabilities
 ```
 
-响应示例：
+响应格式：
 
 ```json
 {
@@ -597,7 +563,6 @@ GET /api/capabilities
   }
 }
 ```
-
 ---
 
 ## 里程碑（Milestone）
