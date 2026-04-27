@@ -1,0 +1,19 @@
+services:
+  watchtogether:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: watchtogether:latest
+    ports:
+      - "8080:8080"
+    environment:
+      ADDR: ":8080"
+      # Optional overrides if tools are not in PATH:
+      # FFMPEG_PATH: /usr/bin/ffmpeg
+      # FFPROBE_PATH: /usr/bin/ffprobe
+      # YT_DLP_PATH: /usr/local/bin/yt-dlp
+      # ARIA2C_PATH: /usr/bin/aria2c
+    # For development, mount source (requires image with go run or custom entrypoint):
+    # volumes:
+    #   - ./data:/data

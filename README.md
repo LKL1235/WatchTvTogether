@@ -471,6 +471,27 @@ watchtogether/
 - aria2（磁力链接下载需要）
 - **无需** PostgreSQL，**无需** Redis（使用 SQLite + 内存）
 
+#### Docker 镜像与 Compose
+
+仓库根目录提供 `Dockerfile` 与 `docker-compose.yml`：基础镜像为 Ubuntu 24.04，通过 `apt` 安装 **FFmpeg 6+**（含 `ffprobe`）与 **aria2**，并下载官方 **yt-dlp** 单文件到 `/usr/local/bin/yt-dlp`，供容器内 `PATH` 使用。
+
+- 构建并运行（需本机已安装 Docker / Compose）：
+
+  ```bash
+  docker compose up --build
+  ```
+
+- 服务启动后可在容器内用 **GET** `/readyz` 或 **GET** `/api/deps` 查看 `ffmpeg` / `ffprobe` / `yt-dlp` / `aria2c` 是否可用及版本；全部就绪时返回 **200**，否则 **503**（用于编排就绪探针）。
+
+- 可覆盖可执行文件路径（例如自定义安装位置）：
+
+  | 环境变量        | 说明        | 默认       |
+  |-----------------|-------------|------------|
+  | `FFMPEG_PATH`   | `ffmpeg`    | `PATH` 中  |
+  | `FFPROBE_PATH`  | `ffprobe`   | `PATH` 中  |
+  | `YT_DLP_PATH`   | `yt-dlp`    | `PATH` 中  |
+  | `ARIA2C_PATH`   | `aria2c`    | `PATH` 中  |
+
 ### 生产环境
 
 - 以上所有开发依赖
