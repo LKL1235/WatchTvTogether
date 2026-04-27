@@ -235,15 +235,15 @@ func main() {
 
 #### 功能清单
 
-- [ ] 用户注册：用户名、密码（bcrypt/argon2 等安全哈希存储，不明文存库）
-- [ ] 用户登录：校验密码后生成 JWT（Access Token + Refresh Token）
-- [ ] 用户角色体系：
+- [x] 用户注册：用户名、密码（bcrypt/argon2 等安全哈希存储，不明文存库）
+- [x] 用户登录：校验密码后生成 JWT（Access Token + Refresh Token）
+- [x] 用户角色体系：
   - `admin`：全部管理权限（用户管理、全局视频库、强制销毁任意房间）
   - `user`：可创建房间，在自己房间内行使房主权限
-- [ ] JWT 中间件鉴权，路由级别 RBAC 权限控制
-- [ ] 用户信息存储（昵称、头像等可选字段）—— 调用 `UserStore`
-- [ ] Token 刷新接口，调用 `SessionCache.SetRefreshToken`
-- [ ] 登出接口，调用 `SessionCache.BlacklistToken`（JWT 黑名单）
+- [x] JWT 中间件鉴权，路由级别 RBAC 权限控制
+- [x] 用户信息存储（昵称、头像等可选字段）—— 调用 `UserStore`
+- [x] Token 刷新接口，调用 `SessionCache.SetRefreshToken`
+- [x] 登出接口，调用 `SessionCache.BlacklistToken`（JWT 黑名单）
 
 #### 接口设计
 
@@ -276,15 +276,15 @@ GET  /api/users/me         → 获取当前用户信息
 
 #### 功能清单
 
-- [ ] 房间 CRUD 接口，调用 `RoomStore`
-- [ ] WebSocket Hub 实现（`internal/room/hub.go`）：
+- [x] 房间 CRUD 接口，调用 `RoomStore`
+- [x] WebSocket Hub 实现（`internal/room/hub.go`）：
   - 每个房间一个 Hub，管理该房间所有 WebSocket 连接
   - 通过 `PubSub` 接收广播消息（解耦消息来源，支持未来多实例）
   - 收到消息后 fanout 给房间内所有连接
-- [ ] 播放状态写入 `RoomStateCache`（新成员加入时拉取快照同步进度）
-- [ ] 消息类型处理：`play_control`（权限校验）、`room_event`（成员变化）
-- [ ] 心跳检测（Ping/Pong）与断线清理
-- [ ] 房间销毁时清理 Hub 和 `RoomStateCache`
+- [x] 播放状态写入 `RoomStateCache`（新成员加入时拉取快照同步进度）
+- [x] 消息类型处理：`play_control`（权限校验）、`room_event`（成员变化）
+- [x] 心跳检测（Ping/Pong）与断线清理
+- [x] 房间销毁时清理 Hub 和 `RoomStateCache`
 
 #### 接口设计
 
@@ -308,16 +308,16 @@ GET       /api/rooms/:roomId/state   → 房间播放状态快照（初次加入
 
 #### 页面/组件清单
 
-- [ ] **登录 / 注册页**：账号密码注册与登录
-- [ ] **首页/大厅**：展示公开房间列表，支持创建房间
-- [ ] **房间创建弹窗**：房间名、公开/私有、可选密码
-- [ ] **房间页**（核心）：
+- [x] **登录 / 注册页**：账号密码注册与登录
+- [x] **首页/大厅**：展示公开房间列表，支持创建房间
+- [x] **房间创建弹窗**：房间名、公开/私有、可选密码
+- [x] **房间页**（核心）：
   - 视频播放器（HLS.js 支持 m3u8，Video.js 支持 mp4）
   - 播放控制栏（仅房主/admin 可操作：播放/暂停/拖进度/切换视频）
   - 视频队列面板（房主可拖拽排序、删除、添加 URL 或从视频库选择）
   - 在线成员列表（头像/昵称，房主可踢出）
-- [ ] **管理员后台**：用户管理、视频库管理、房间监控
-- [ ] WebSocket 连接管理（composable `useRoomSocket`）：
+- [x] **管理员后台**：用户管理、视频库管理、房间监控
+- [x] WebSocket 连接管理（composable `useRoomSocket`）：
   - 接收 `sync` 消息后同步本地播放器进度
   - 普通成员播放器控制栏置为禁用只读
 

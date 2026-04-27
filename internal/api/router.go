@@ -6,8 +6,10 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
+	"watchtogether/internal/auth"
 	"watchtogether/internal/cache"
 	"watchtogether/internal/config"
+	roomhub "watchtogether/internal/room"
 	"watchtogether/internal/store"
 	"watchtogether/pkg/apierr"
 )
@@ -48,6 +50,11 @@ func NewRouter(deps Dependencies) *gin.Engine {
 
 	router.StaticFS("/static/videos", http.Dir(deps.Config.StorageDir))
 	router.StaticFS("/static/posters", http.Dir(deps.Config.PosterDir))
+
+	authService := auth.NewService(deps.UserStore, deps.SessionCache, deps.Config)
+	hubs := roomhub.NewManager(deps.PubSub, deps.RoomStateCache)
+	registerAuthRoutes(router, deps, authService)
+	registerRoomRoutes(router, deps, authService, hubs)
 
 	return router
 }
