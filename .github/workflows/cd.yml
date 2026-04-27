@@ -25,11 +25,13 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
-      - name: Build linux amd64 backend
+      - name: Build linux/amd64 (x86_64) backend
         env:
           CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: amd64
+          # Baseline x86-64 to match "linux x86_64" servers without AVX, etc.
+          GOAMD64: "v1"
         run: |
           mkdir -p dist
           go build -trimpath -ldflags="-s -w" -o dist/watchtogether-linux-amd64 ./cmd/server
@@ -54,16 +56,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v3
+      - name: Resolve OCI image names (lowercase; GHCR requires owner/repo in lower case)
+        id: oci
+        env:
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          {
+            echo "images<<__IMAGES__"
+            echo "ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
+            if [ -n "$DOCKERHUB_USER" ]; then
+              echo "docker.io/${DOCKERHUB_USER}/watchtogether" | tr '[:upper:]' '[:lower:]'
+            fi
+            echo "__IMAGES__"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: |
-            ghcr.io/${{ github.repository }}
-            ${{ env.DOCKERHUB_USERNAME && format('docker.io/{0}/watchtogether', env.DOCKERHUB_USERNAME) || '' }}
+          images: ${{ steps.oci.outputs.images }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -84,7 +96,8 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          # Match release binary target: linux x86_64 (amd64) only
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

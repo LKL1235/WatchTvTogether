@@ -11,7 +11,7 @@ RUN apk add --no-cache git
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/watchtogether ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -ldflags="-s -w" -o /out/watchtogether ./cmd/server
 
 FROM ubuntu:24.04 AS runtime
 RUN apt-get update \
