@@ -184,22 +184,22 @@ func main() {
 
 #### 0.1 接口定义
 
-- [ ] 在 `internal/store/store.go` 定义 `UserStore`、`RoomStore`、`VideoStore`、`DownloadTaskStore` interface
-- [ ] 在 `internal/cache/cache.go` 定义 `SessionCache`、`RoomStateCache`、`PubSub` interface
-- [ ] 在 `internal/model/` 定义所有领域模型结构体（`User`、`Room`、`Video`、`DownloadTask`、`RoomState`）
+- [x] 在 `internal/store/store.go` 定义 `UserStore`、`RoomStore`、`VideoStore`、`DownloadTaskStore` interface
+- [x] 在 `internal/cache/cache.go` 定义 `SessionCache`、`RoomStateCache`、`PubSub` interface
+- [x] 在 `internal/model/` 定义所有领域模型结构体（`User`、`Room`、`Video`、`DownloadTask`、`RoomState`）
 
 #### 0.2 SQLite 实现（开发阶段底层）
 
-- [ ] 引入 `modernc.org/sqlite`（纯 Go，无 CGO 依赖）
-- [ ] 实现 `internal/store/sqlite/` 下所有 Store interface
-- [ ] 编写 SQLite schema 初始化脚本（`internal/store/sqlite/schema.sql`）
-- [ ] 实现自动建表（首次启动时执行 schema，无需迁移工具）
+- [x] 引入 `modernc.org/sqlite`（纯 Go，无 CGO 依赖）
+- [x] 实现 `internal/store/sqlite/` 下所有 Store interface
+- [x] 编写 SQLite schema 初始化脚本（`internal/store/sqlite/schema.sql`）
+- [x] 实现自动建表（首次启动时执行 schema，无需迁移工具）
 
 #### 0.3 内存实现（开发阶段底层）
 
-- [ ] 实现 `internal/cache/memory/session_cache.go`（内存 Map + sync.RWMutex，支持 TTL）
-- [ ] 实现 `internal/cache/memory/room_state_cache.go`（内存 Map）
-- [ ] 实现 `internal/cache/memory/pubsub.go`（内存 channel，支持多订阅者 fanout）
+- [x] 实现 `internal/cache/memory/session_cache.go`（内存 Map + sync.RWMutex，支持 TTL）
+- [x] 实现 `internal/cache/memory/room_state_cache.go`（内存 Map）
+- [x] 实现 `internal/cache/memory/pubsub.go`（内存 channel，支持多订阅者 fanout）
 
 #### 0.4 PostgreSQL 实现（生产阶段底层，可后续补充）
 
@@ -212,20 +212,20 @@ func main() {
 
 #### 0.6 配置与依赖注入
 
-- [ ] 在 `internal/config/` 定义配置结构（支持环境变量 + 配置文件）
-- [ ] 在 `cmd/server/main.go` 实现工厂函数：根据 `STORAGE_BACKEND=sqlite|postgres` 和 `CACHE_BACKEND=memory|redis` 动态选择实现
-- [ ] 编写接口实现一致性测试（`internal/store/testutil/`），SQLite 和 Postgres 实现均需通过同一套测试用例
+- [x] 在 `internal/config/` 定义配置结构（支持环境变量 + 配置文件）
+- [x] 在 `cmd/server/main.go` 实现工厂函数：根据 `STORAGE_BACKEND=sqlite|postgres` 和 `CACHE_BACKEND=memory|redis` 动态选择实现（已接入 SQLite / Memory，Postgres / Redis 待后续实现后接入）
+- [x] 编写接口实现一致性测试（`internal/store/testutil/`），SQLite 已接入，Postgres 实现补充后复用同一套测试用例
 
 ---
 
 ### 阶段 1：Go 后端基础框架
 
-- [ ] 初始化 Go Module（`go mod init`），配置项目目录结构
-- [ ] 引入 Gin 路由框架，配置基础中间件（日志、Recovery、CORS）
-- [ ] 统一错误响应格式与错误码定义（`pkg/apierr/`）
-- [ ] 健康检查接口 `GET /healthz`
-- [ ] 静态文件服务（视频文件、海报图片）
-- [ ] 配置加载（`config.yaml` + 环境变量覆盖）
+- [x] 初始化 Go Module（`go mod init`），配置项目目录结构
+- [x] 引入 Gin 路由框架，配置基础中间件（日志、Recovery、CORS）
+- [x] 统一错误响应格式与错误码定义（`pkg/apierr/`）
+- [x] 健康检查接口 `GET /healthz`
+- [x] 静态文件服务（视频文件、海报图片）
+- [x] 配置加载（`config.yaml` + 环境变量覆盖）
 
 ---
 

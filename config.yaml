@@ -1,0 +1,11 @@
+addr: ":8080"
+storage_backend: sqlite
+sqlite_path: "./data/watchtogether.db"
+postgres_dsn: "postgres://user:pass@localhost:5432/watchtogether?sslmode=disable"
+cache_backend: memory
+redis_addr: "localhost:6379"
+jwt_secret: "change-me-in-production"
+jwt_access_ttl: "15m"
+jwt_refresh_ttl: "7d"
+storage_dir: "./data/videos"
+poster_dir: "./data/posters"
