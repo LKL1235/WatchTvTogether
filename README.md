@@ -7,26 +7,21 @@
 
 ## Quick start
 
-下面两种方式任选其一：前者适合「静态站点托管 + 自建 API」；后者适合「一条命令在本地/服务器跑齐前后端」。
+下面两种方式任选其一：前者适合「前端上云托管 + API 自建」；后者适合「一条命令在本地/服务器跑齐前后端」。
 
-### 方式一：Vercel 全栈（Go 运行时 + 同一部署中的前端构建）
+### 方式一：Vercel 仅部署前端（推荐）
 
-本仓库根目录含 `go.mod` 与 `vercel.json`，与 [Vercel Go 运行时](https://vercel.com/docs/functions/runtimes/go) 的 **Go Framework Preset** 一致：以 `cmd/server/main.go` 为入口，进程监听环境变量 **`PORT`**，并在构建阶段先执行前端的 `npm ci` / `npm run build`，产物目录为 `frontend/dist`。
+本仓库的 `vercel.json` 已改为 **Vite 静态部署**（`framework: "vite"`），仅构建 `frontend` 并输出 `frontend/dist`，不再在 Vercel 构建 Go 后端。
 
-1. 在 Vercel 中 **Import** 本仓库，**根目录保持仓库根**（不要只选 `frontend`）。`vercel.json` 已设置 `"framework": "go"`、`installCommand`、`buildCommand`、`outputDirectory`。
-2. **生产数据库与缓存**：Serverless 无持久本地磁盘，仓库已默认在 **Vercel 运行时**（`VERCEL=1`）强制 **`postgres` + `redis`**，无需再手写 `STORAGE_BACKEND` / `CACHE_BACKEND`。请在项目中接入 **Vercel Postgres** 与 **Vercel Marketplace Redis**（或兼容服务），并至少配置：
-   - **`DATABASE_URL`**（由 Vercel Postgres 自动注入；也可用 `POSTGRES_DSN` 显式覆盖）
-   - **`REDIS_URL`**（常见为 TLS `rediss://...`；若只用主机端口可配 `REDIS_ADDR`）
-   - **`JWT_SECRET`**（强随机密钥）
-   也可在 **Settings → Environment Variables** 中设置 `STORAGE_BACKEND` / `CACHE_BACKEND` 覆盖上述自动选择（一般不必）。
-3. 构建阶段会将 **`STORAGE_BACKEND=postgres`**、**`CACHE_BACKEND=redis`** 写入 `vercel.json` 的 `build.env`（与运行时 `VERCEL` 逻辑一致）。同时注入 **`FRONTEND_DIST=frontend/dist`**，Go 会从该目录提供 Vue 构建并对非 API 路由做 SPA 回退；前端默认相对路径访问 `/api`、`/ws`，与同源部署一致。
-4. **限制**：下载任务、FFmpeg、aria2、本地大文件缓存等依赖常驻磁盘或外部工具链，在纯 Serverless 上通常不可用或需额外架构；若要用完整下载/转码能力，请使用 **Docker / 自托管**（方式二）或拆出 Worker。
+1. 在 Vercel 中 **Import** 本仓库，**Root Directory 保持仓库根目录**。
+2. 确认环境变量 **`VITE_API_BASE`** 指向你的后端地址（例如 `https://api.example.com`）。
+3. `vercel.json` 已包含 SPA 回退 rewrite：非 `/api`、`/ws`、`/static`、`/healthz` 路径都会回到 `index.html`，支持 Vue Router 刷新直达。
+4. 你的后端需要独立部署（Docker、VM、K8s 均可），并配置：
+   - **CORS 允许前端域名**
+   - **WebSocket 可达（`/ws`）**
+   - 数据库/缓存（Postgres、Redis）与 `JWT_SECRET` 等运行时环境变量
 
-### 方式二（可选）：仅前端在 Vercel + API 自托管
-
-若仍希望静态站点与 API 分离：将 Vercel 项目 **Root Directory** 设为 `frontend`，构建输出 `dist`，并设置 `VITE_API_BASE` 指向独立 API 域名；后端自行部署并配置 **CORS** 与 **WebSocket** 可达性。
-
-### 方式三：Docker Compose（前后端一体）
+### 方式二：Docker Compose（前后端一体）
 
 镜像在构建时会把 Vite 产物嵌入 Go 进程，**同一端口** 提供 API 与静态资源，适合本地或单机服务器快速体验。
 
