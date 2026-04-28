@@ -139,6 +139,10 @@ func applyVercelDefaults(cfg *Config) {
 			cfg.PostgresDSN = v
 		}
 	}
+	// build.env FRONTEND_DIST does not apply to the Go runtime; default SPA root on Vercel.
+	if strings.TrimSpace(cfg.StaticRoot) == "" {
+		cfg.StaticRoot = "frontend/dist"
+	}
 }
 
 func splitCSV(s string) []string {

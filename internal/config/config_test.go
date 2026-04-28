@@ -24,6 +24,23 @@ func TestLoad_VercelForcesPostgresRedisAndUsesDATABASE_URL(t *testing.T) {
 	if cfg.PostgresDSN != "postgres://v:test@db.example:5432/app?sslmode=require" {
 		t.Fatalf("PostgresDSN: got %q", cfg.PostgresDSN)
 	}
+	if cfg.StaticRoot != "frontend/dist" {
+		t.Fatalf("StaticRoot: got %q want frontend/dist", cfg.StaticRoot)
+	}
+}
+
+func TestLoad_VercelStaticRootEnvOverridesDefault(t *testing.T) {
+	t.Setenv("VERCEL", "1")
+	t.Setenv("DATABASE_URL", "postgres://v:test@db.example:5432/app?sslmode=require")
+	t.Setenv("FRONTEND_DIST", "custom/spa")
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StaticRoot != "custom/spa" {
+		t.Fatalf("StaticRoot: got %q want custom/spa", cfg.StaticRoot)
+	}
 }
 
 func TestLoad_VercelPostgresDSNExplicitOverridesDATABASE_URL(t *testing.T) {

@@ -19,7 +19,7 @@
    - **`REDIS_URL`**（常见为 TLS `rediss://...`；若只用主机端口可配 `REDIS_ADDR`）
    - **`JWT_SECRET`**（强随机密钥）
    也可在 **Settings → Environment Variables** 中设置 `STORAGE_BACKEND` / `CACHE_BACKEND` 覆盖上述自动选择（一般不必）。
-3. 构建阶段会将 **`STORAGE_BACKEND=postgres`**、**`CACHE_BACKEND=redis`** 写入 `vercel.json` 的 `build.env`（与运行时 `VERCEL` 逻辑一致）。同时注入 **`FRONTEND_DIST=frontend/dist`**，Go 会从该目录提供 Vue 构建并对非 API 路由做 SPA 回退；前端默认相对路径访问 `/api`、`/ws`，与同源部署一致。
+3. `vercel.json` 的 **`build.env`** 仅为构建命令提供 **`STORAGE_BACKEND` / `CACHE_BACKEND` / `FRONTEND_DIST`**（与文档一致）。Go 在 **`VERCEL=1`** 时会在运行时使用与 `build.env` 相同的存储/缓存默认，并在未设置 **`STATIC_ROOT` / `FRONTEND_DIST`** 时默认 **`frontend/dist`** 作为 SPA 目录（否则根路径会得到 JSON `route not found`）。若目录或路径不同，请在 Vercel **Environment Variables** 中设置 **`FRONTEND_DIST`** 或 **`static_root`**（YAML）对应路径。前端默认相对路径访问 `/api`、`/ws`，与同源部署一致。
 4. **限制**：下载任务、FFmpeg、aria2、本地大文件缓存等依赖常驻磁盘或外部工具链，在纯 Serverless 上通常不可用或需额外架构；若要用完整下载/转码能力，请使用 **Docker / 自托管**（方式二）或拆出 Worker。
 
 ### 方式二（可选）：仅前端在 Vercel + API 自托管
