@@ -14,12 +14,12 @@
 本仓库根目录含 `go.mod` 与 `vercel.json`，与 [Vercel Go 运行时](https://vercel.com/docs/functions/runtimes/go) 的 **Go Framework Preset** 一致：以 `cmd/server/main.go` 为入口，进程监听环境变量 **`PORT`**，并在构建阶段先执行前端的 `npm ci` / `npm run build`，产物目录为 `frontend/dist`。
 
 1. 在 Vercel 中 **Import** 本仓库，**根目录保持仓库根**（不要只选 `frontend`）。`vercel.json` 已设置 `"framework": "go"`、`installCommand`、`buildCommand`、`outputDirectory`。
-2. **生产数据库**：Serverless 实例无持久可写磁盘，**不要用默认 SQLite 路径**。在 **Settings → Environment Variables** 中至少配置：
-   - `STORAGE_BACKEND=postgres`
-   - `POSTGRES_DSN`（Vercel Postgres 或其它兼容连接串）
-   - `JWT_SECRET`（强随机密钥）
-   - 按需：`CACHE_BACKEND=redis` 与 `REDIS_ADDR`（Upstash Redis 等）
-3. 构建时会把静态站点路径注入 **`FRONTEND_DIST=frontend/dist`**（见 `vercel.json` 的 `build.env`），Go 进程会从该目录提供 Vue 构建结果并对非 API 路由做 SPA 回退；前端默认相对路径访问 `/api`、`/ws`，与同源部署一致。
+2. **生产数据库与缓存**：Serverless 无持久本地磁盘，仓库已默认在 **Vercel 运行时**（`VERCEL=1`）强制 **`postgres` + `redis`**，无需再手写 `STORAGE_BACKEND` / `CACHE_BACKEND`。请在项目中接入 **Vercel Postgres** 与 **Vercel Marketplace Redis**（或兼容服务），并至少配置：
+   - **`DATABASE_URL`**（由 Vercel Postgres 自动注入；也可用 `POSTGRES_DSN` 显式覆盖）
+   - **`REDIS_URL`**（常见为 TLS `rediss://...`；若只用主机端口可配 `REDIS_ADDR`）
+   - **`JWT_SECRET`**（强随机密钥）
+   也可在 **Settings → Environment Variables** 中设置 `STORAGE_BACKEND` / `CACHE_BACKEND` 覆盖上述自动选择（一般不必）。
+3. 构建阶段会将 **`STORAGE_BACKEND=postgres`**、**`CACHE_BACKEND=redis`** 写入 `vercel.json` 的 `build.env`（与运行时 `VERCEL` 逻辑一致）。同时注入 **`FRONTEND_DIST=frontend/dist`**，Go 会从该目录提供 Vue 构建并对非 API 路由做 SPA 回退；前端默认相对路径访问 `/api`、`/ws`，与同源部署一致。
 4. **限制**：下载任务、FFmpeg、aria2、本地大文件缓存等依赖常驻磁盘或外部工具链，在纯 Serverless 上通常不可用或需额外架构；若要用完整下载/转码能力，请使用 **Docker / 自托管**（方式二）或拆出 Worker。
 
 ### 方式二（可选）：仅前端在 Vercel + API 自托管

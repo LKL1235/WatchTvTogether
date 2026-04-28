@@ -152,7 +152,10 @@ func newCaches(cfg config.Config) (*caches, error) {
 			pubsub:     memory.NewPubSub(),
 		}, nil
 	case "redis":
-		client := rediscache.NewClient(cfg.RedisAddr)
+		client, err := rediscache.NewClient(cfg.RedisAddr, cfg.RedisURL)
+		if err != nil {
+			return nil, err
+		}
 		if err := client.Ping(context.Background()).Err(); err != nil {
 			_ = client.Close()
 			return nil, err
