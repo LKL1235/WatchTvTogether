@@ -19,12 +19,14 @@ const (
 )
 
 type Config struct {
-	Addr             string        `yaml:"addr"`
-	StorageBackend   string        `yaml:"storage_backend"`
-	SQLitePath       string        `yaml:"sqlite_path"`
-	PostgresDSN      string        `yaml:"postgres_dsn"`
-	CacheBackend     string        `yaml:"cache_backend"`
-	RedisAddr        string        `yaml:"redis_addr"`
+	Addr           string `yaml:"addr"`
+	StorageBackend string `yaml:"storage_backend"`
+	SQLitePath     string `yaml:"sqlite_path"`
+	PostgresDSN    string `yaml:"postgres_dsn"`
+	CacheBackend   string `yaml:"cache_backend"`
+	RedisAddr      string `yaml:"redis_addr"`
+	// RedisURL is optional; when set (e.g. Vercel Marketplace / Upstash REDIS_URL), it takes precedence over RedisAddr.
+	RedisURL         string        `yaml:"redis_url"`
 	JWTSecret        string        `yaml:"jwt_secret"`
 	JWTAccessTTL     time.Duration `yaml:"-"`
 	JWTRefreshTTL    time.Duration `yaml:"-"`
@@ -98,8 +100,13 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.StorageBackend, "STORAGE_BACKEND")
 	setString(&cfg.SQLitePath, "SQLITE_PATH")
 	setString(&cfg.PostgresDSN, "POSTGRES_DSN")
+	// Vercel Postgres and many hosts inject DATABASE_URL; use it when POSTGRES_DSN is unset.
+	if strings.TrimSpace(cfg.PostgresDSN) == "" {
+		setString(&cfg.PostgresDSN, "DATABASE_URL")
+	}
 	setString(&cfg.CacheBackend, "CACHE_BACKEND")
 	setString(&cfg.RedisAddr, "REDIS_ADDR")
+	setString(&cfg.RedisURL, "REDIS_URL")
 	setString(&cfg.JWTSecret, "JWT_SECRET")
 	setString(&cfg.JWTAccessTTLRaw, "JWT_ACCESS_TTL")
 	setString(&cfg.JWTRefreshTTLRaw, "JWT_REFRESH_TTL")
@@ -114,6 +121,23 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.StaticRoot, "STATIC_ROOT")
 	if v := strings.TrimSpace(os.Getenv("FRONTEND_DIST")); v != "" {
 		cfg.StaticRoot = v
+	}
+	applyVercelDefaults(cfg)
+}
+
+// applyVercelDefaults forces Postgres + Redis on Vercel (VERCEL=1): serverless has no durable local SQLite
+// and in-memory cache does not span instances. DATABASE_URL from Vercel Postgres overrides any placeholder DSN.
+func applyVercelDefaults(cfg *Config) {
+	if strings.TrimSpace(os.Getenv("VERCEL")) == "" {
+		return
+	}
+	cfg.StorageBackend = StorageBackendPostgres
+	cfg.CacheBackend = CacheBackendRedis
+	if v := strings.TrimSpace(os.Getenv("DATABASE_URL")); v != "" {
+		// Do not override an explicit POSTGRES_DSN from the environment.
+		if strings.TrimSpace(os.Getenv("POSTGRES_DSN")) == "" {
+			cfg.PostgresDSN = v
+		}
 	}
 }
 

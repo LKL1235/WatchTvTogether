@@ -6,7 +6,9 @@
   "outputDirectory": "frontend/dist",
   "build": {
     "env": {
-      "FRONTEND_DIST": "frontend/dist"
+      "FRONTEND_DIST": "frontend/dist",
+      "STORAGE_BACKEND": "postgres",
+      "CACHE_BACKEND": "redis"
     }
   }
 }
