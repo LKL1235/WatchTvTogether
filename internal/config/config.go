@@ -36,6 +36,8 @@ type Config struct {
 	Aria2RPCURL      string        `yaml:"aria2_rpc_url"`
 	Aria2Secret      string        `yaml:"aria2_secret"`
 	CorsOrigins      []string      `yaml:"cors_origins"`
+	// StaticRoot is the directory of the built SPA (e.g. frontend/dist); empty disables integrated static hosting.
+	StaticRoot string `yaml:"static_root"`
 }
 
 func Default() Config {
@@ -85,7 +87,14 @@ func loadFile(path string, cfg *Config) error {
 }
 
 func applyEnv(cfg *Config) {
-	setString(&cfg.Addr, "ADDR")
+	// Vercel and many PaaS set PORT; use it when ADDR is not explicitly set.
+	addrEnv := strings.TrimSpace(os.Getenv("ADDR"))
+	portEnv := strings.TrimSpace(os.Getenv("PORT"))
+	if addrEnv != "" {
+		cfg.Addr = addrEnv
+	} else if portEnv != "" {
+		cfg.Addr = ":" + portEnv
+	}
 	setString(&cfg.StorageBackend, "STORAGE_BACKEND")
 	setString(&cfg.SQLitePath, "SQLITE_PATH")
 	setString(&cfg.PostgresDSN, "POSTGRES_DSN")
@@ -101,6 +110,10 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.Aria2Secret, "ARIA2_SECRET")
 	if v := strings.TrimSpace(os.Getenv("CORS_ORIGINS")); v != "" {
 		cfg.CorsOrigins = splitCSV(v)
+	}
+	setString(&cfg.StaticRoot, "STATIC_ROOT")
+	if v := strings.TrimSpace(os.Getenv("FRONTEND_DIST")); v != "" {
+		cfg.StaticRoot = v
 	}
 }
 
