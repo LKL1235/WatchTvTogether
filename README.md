@@ -9,13 +9,24 @@
 
 下面两种方式任选其一：前者适合「静态站点托管 + 自建 API」；后者适合「一条命令在本地/服务器跑齐前后端」。
 
-### 方式一：Vercel 前端 + 自托管后端
+### 方式一：Vercel 全栈（Go 运行时 + 同一部署中的前端构建）
 
-1. 在 [Vercel](https://vercel.com) 中 **Import** 本仓库。若根目录已提供 `vercel.json`，会按其中配置在 `frontend/` 下执行安装与构建；**否则** 在项目 **Settings → General** 里将 **Root Directory** 设为 `frontend`，Build 命令 `npm run build`，输出目录 `dist`。
-2. 在 **Settings → Environment Variables** 中设置 `VITE_API_BASE`，值为后端对浏览器可访问的基础地址（例如 `https://api.你的域名`，**不要**在末尾加 `/`）。需自行在服务器上部署并暴露 Go 服务，并在后端为前端所在域名配置 **CORS**；若使用 WebSocket，需保证公网/内网到后端的 `ws` 或 `wss` 可连通（见前端对 `/api`、`/ws` 等路径的访问方式）。
-3. 触发部署后，使用 Vercel 给出的站点 URL 即可打开页面。
+本仓库根目录含 `go.mod` 与 `vercel.json`，与 [Vercel Go 运行时](https://vercel.com/docs/functions/runtimes/go) 的 **Go Framework Preset** 一致：以 `cmd/server/main.go` 为入口，进程监听环境变量 **`PORT`**，并在构建阶段先执行前端的 `npm ci` / `npm run build`，产物目录为 `frontend/dist`。
 
-### 方式二：Docker Compose（前后端一体）
+1. 在 Vercel 中 **Import** 本仓库，**根目录保持仓库根**（不要只选 `frontend`）。`vercel.json` 已设置 `"framework": "go"`、`installCommand`、`buildCommand`、`outputDirectory`。
+2. **生产数据库**：Serverless 实例无持久可写磁盘，**不要用默认 SQLite 路径**。在 **Settings → Environment Variables** 中至少配置：
+   - `STORAGE_BACKEND=postgres`
+   - `POSTGRES_DSN`（Vercel Postgres 或其它兼容连接串）
+   - `JWT_SECRET`（强随机密钥）
+   - 按需：`CACHE_BACKEND=redis` 与 `REDIS_ADDR`（Upstash Redis 等）
+3. 构建时会把静态站点路径注入 **`FRONTEND_DIST=frontend/dist`**（见 `vercel.json` 的 `build.env`），Go 进程会从该目录提供 Vue 构建结果并对非 API 路由做 SPA 回退；前端默认相对路径访问 `/api`、`/ws`，与同源部署一致。
+4. **限制**：下载任务、FFmpeg、aria2、本地大文件缓存等依赖常驻磁盘或外部工具链，在纯 Serverless 上通常不可用或需额外架构；若要用完整下载/转码能力，请使用 **Docker / 自托管**（方式二）或拆出 Worker。
+
+### 方式二（可选）：仅前端在 Vercel + API 自托管
+
+若仍希望静态站点与 API 分离：将 Vercel 项目 **Root Directory** 设为 `frontend`，构建输出 `dist`，并设置 `VITE_API_BASE` 指向独立 API 域名；后端自行部署并配置 **CORS** 与 **WebSocket** 可达性。
+
+### 方式三：Docker Compose（前后端一体）
 
 镜像在构建时会把 Vite 产物嵌入 Go 进程，**同一端口** 提供 API 与静态资源，适合本地或单机服务器快速体验。
 
