@@ -1,34 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "experimentalServices": {
-    "frontend": {
-      "entrypoint": "frontend",
-      "routePrefix": "/",
-      "framework": "vite"
-    },
-    "api": {
-      "entrypoint": ".",
-      "routePrefix": "/api",
-      "framework": "go"
-    },
-    "ws": {
-      "entrypoint": ".",
-      "routePrefix": "/ws",
-      "framework": "go"
-    },
-    "static": {
-      "entrypoint": ".",
-      "routePrefix": "/static",
-      "framework": "go"
-    },
-    "healthz": {
-      "entrypoint": ".",
-      "routePrefix": "/healthz",
-      "framework": "go"
-    }
-  },
+  "framework": "go",
+  "installCommand": "cd frontend && npm ci",
+  "buildCommand": "cd frontend && npm run build",
+  "outputDirectory": "frontend/dist",
   "build": {
     "env": {
+      "FRONTEND_DIST": "frontend/dist",
       "STORAGE_BACKEND": "postgres",
       "CACHE_BACKEND": "redis"
     }

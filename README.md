@@ -9,18 +9,18 @@
 
 下面两种方式任选其一：前者适合「静态站点托管 + 自建 API」；后者适合「一条命令在本地/服务器跑齐前后端」。
 
-### 方式一：Vercel Services（前后端同域多 Service）
+### 方式一：Vercel 全栈（Go 运行时 + 同一部署中的前端构建）
 
-本仓库使用 `vercel.json` 的 `experimentalServices`：`frontend`（`/`）负责 Vue 页面，Go 服务按路径挂载到 `/api`、`/ws`、`/static`、`/healthz`，保持前端现有请求路径不变。
+本仓库根目录含 `go.mod` 与 `vercel.json`，与 [Vercel Go 运行时](https://vercel.com/docs/functions/runtimes/go) 的 **Go Framework Preset** 一致：以 `cmd/server/main.go` 为入口，进程监听环境变量 **`PORT`**，并在构建阶段先执行前端的 `npm ci` / `npm run build`，产物目录为 `frontend/dist`。
 
-1. 在 Vercel 中 **Import** 本仓库，**根目录保持仓库根**（不要只选 `frontend`）。
-2. 在 **Project Settings → Build & Deployment → Framework Preset** 选择 **Services**（必需）。
-3. **生产数据库与缓存**：请在 Vercel Marketplace 连接 **Neon Postgres** 与 **Upstash Redis**（Vercel Storage 当前推荐组合），确保至少存在：
-   - **`DATABASE_URL`**（Neon 注入；也可用 `POSTGRES_DSN` 显式覆盖）
-   - **`REDIS_URL`**（通常为 `rediss://...`；若只用主机端口可配 `REDIS_ADDR`）
+1. 在 Vercel 中 **Import** 本仓库，**根目录保持仓库根**（不要只选 `frontend`）。`vercel.json` 已设置 `"framework": "go"`、`installCommand`、`buildCommand`、`outputDirectory`。
+2. **生产数据库与缓存**：Serverless 无持久本地磁盘，仓库已默认在 **Vercel 运行时**（`VERCEL=1`）强制 **`postgres` + `redis`**，无需再手写 `STORAGE_BACKEND` / `CACHE_BACKEND`。请在项目中接入 **Vercel Postgres** 与 **Vercel Marketplace Redis**（或兼容服务），并至少配置：
+   - **`DATABASE_URL`**（由 Vercel Postgres 自动注入；也可用 `POSTGRES_DSN` 显式覆盖）
+   - **`REDIS_URL`**（常见为 TLS `rediss://...`；若只用主机端口可配 `REDIS_ADDR`）
    - **`JWT_SECRET`**（强随机密钥）
-4. 构建阶段会将 **`STORAGE_BACKEND=postgres`**、**`CACHE_BACKEND=redis`** 注入 `vercel.json` 的 `build.env`，与运行时 `VERCEL=1` 的自动生产配置保持一致。
-5. **限制**：下载任务、FFmpeg、aria2、本地大文件缓存等依赖常驻磁盘或外部工具链，在纯 Serverless 上通常不可用或需额外架构；若要用完整下载/转码能力，请使用 **Docker / 自托管**（方式二）或拆出 Worker。
+   也可在 **Settings → Environment Variables** 中设置 `STORAGE_BACKEND` / `CACHE_BACKEND` 覆盖上述自动选择（一般不必）。
+3. 构建阶段会将 **`STORAGE_BACKEND=postgres`**、**`CACHE_BACKEND=redis`** 写入 `vercel.json` 的 `build.env`（与运行时 `VERCEL` 逻辑一致）。同时注入 **`FRONTEND_DIST=frontend/dist`**，Go 会从该目录提供 Vue 构建并对非 API 路由做 SPA 回退；前端默认相对路径访问 `/api`、`/ws`，与同源部署一致。
+4. **限制**：下载任务、FFmpeg、aria2、本地大文件缓存等依赖常驻磁盘或外部工具链，在纯 Serverless 上通常不可用或需额外架构；若要用完整下载/转码能力，请使用 **Docker / 自托管**（方式二）或拆出 Worker。
 
 ### 方式二（可选）：仅前端在 Vercel + API 自托管
 
