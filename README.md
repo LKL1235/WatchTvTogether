@@ -1,13 +1,14 @@
 # WatchTogether Backend
 
-WatchTogether 的后端服务仓库（Go + Gin + WebSocket）。
+WatchTogether 的后端服务仓库（Go + Gin + Ably realtime）。
 
 ## 说明
 
 本仓库已调整为前后端分离模式：
-- 仅包含后端 API / WebSocket / 下载任务 / 媒体与海报静态文件服务
+- 仅包含后端 API / 下载任务 / 媒体与海报静态文件服务
 - 不再包含前端工程与前端部署配置
 - 不再由 Go 服务托管 SPA 静态页面
+- 房间实时同步统一使用 Ably，后端不再提供 `/ws/room/:roomId`
 
 ## Quick Start
 
@@ -43,8 +44,12 @@ docker compose up -d --build
 - `GET /api/rooms`
 - `GET /api/rooms/:roomId`
 - `POST /api/rooms/:roomId/join`
+- `POST /api/rooms/:roomId/snapshot`
+- `POST /api/rooms/:roomId/control`
+- `POST /api/ably/token`
+- `GET /api/rooms/:roomId/state`
+- `POST /api/rooms/:roomId/kick/:uid`
 - `DELETE /api/rooms/:roomId`
-- `WebSocket /ws/room/:roomId`
 - `GET /api/videos`
 - `GET /api/videos/:id`
 - `GET /static/videos/*`
@@ -59,7 +64,8 @@ docker compose up -d --build
 
 - `cmd/server` 程序入口
 - `internal/api` 路由与 handler
-- `internal/store` 存储抽象与实现（sqlite/postgres）
+- `internal/store` 存储抽象与实现（postgres）
 - `internal/cache` 缓存抽象与实现（memory/redis）
+- `internal/realtime` Ably token 与房间消息发布
 - `internal/download` 下载任务
 - `pkg` 通用工具

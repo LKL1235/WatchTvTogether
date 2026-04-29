@@ -6,23 +6,15 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 
 	authsvc "watchtogether/internal/auth"
 	"watchtogether/internal/download"
 	"watchtogether/pkg/apierr"
-	"watchtogether/pkg/corsutil"
 )
-
-var downloadWSUpgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-}
 
 type downloadHandler struct {
 	deps    Dependencies
 	service *download.Service
-	auth    *authsvc.Service
 }
 
 type createDownloadRequest struct {
@@ -39,14 +31,12 @@ func registerDownloadRoutes(router *gin.Engine, deps Dependencies, authService *
 	if downloadService == nil {
 		return
 	}
-	downloadWSUpgrader.CheckOrigin = corsutil.CheckOrigin(deps.Config.CorsOrigins)
-	h := &downloadHandler{deps: deps, service: downloadService, auth: authService}
+	h := &downloadHandler{deps: deps, service: downloadService}
 	admin := router.Group("/api/admin", requireAuth(authService), requireAdmin)
 	admin.POST("/downloads", h.create)
 	admin.GET("/downloads", h.list)
 	admin.GET("/downloads/:taskId", h.get)
 	admin.DELETE("/downloads/:taskId", h.cancel)
-	router.GET("/ws/admin/downloads", h.ws)
 }
 
 func (h *downloadHandler) create(c *gin.Context) {
@@ -91,45 +81,6 @@ func (h *downloadHandler) cancel(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
-}
-
-func (h *downloadHandler) ws(c *gin.Context) {
-	if h.deps.PubSub == nil {
-		apierr.Abort(c, apierr.Internal("download updates are unavailable"))
-		return
-	}
-	claims, err := h.auth.ParseToken(c.Request.Context(), bearerFromQueryOrHeader(c), authsvc.TokenTypeAccess)
-	if err != nil {
-		apierr.Abort(c, apierr.Unauthorized("valid access token required"))
-		return
-	}
-	if claims.Role != "admin" {
-		apierr.Abort(c, apierr.Forbidden("admin role required"))
-		return
-	}
-	conn, err := downloadWSUpgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-	ch, unsubscribe, err := h.deps.PubSub.Subscribe(c.Request.Context(), download.UpdatesChannel)
-	if err != nil {
-		return
-	}
-	defer unsubscribe()
-	for {
-		select {
-		case <-c.Request.Context().Done():
-			return
-		case msg, ok := <-ch:
-			if !ok {
-				return
-			}
-			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				return
-			}
-		}
-	}
 }
 
 func respondDownloadError(c *gin.Context, err error) {

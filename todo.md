@@ -10,7 +10,7 @@
 
 ## 0. 当前状态与约束梳理
 
-- [ ] 盘点现有实时同步入口：
+- [x] 盘点现有实时同步入口：
   - 后端房间 WebSocket 路由：`GET /ws/room/:roomId`
   - 路由注册位置：`internal/api/room_handlers.go`
   - WebSocket/Hub 逻辑：`internal/room/hub.go`
@@ -18,16 +18,16 @@
   - 房间控制消息类型：
     - 客户端发送：`play_control`
     - 服务端广播：`room_snapshot`、`sync`、`room_event`、`error`
-- [ ] 盘点当前后端依赖：
+- [x] 盘点当前后端依赖：
   - Gin HTTP API
   - `gorilla/websocket`
   - `cache.PubSub` 用于跨实例广播
   - `cache.RoomStateCache` 用于持久化房间播放状态
-- [ ] 明确 Vercel 部署约束：
+- [x] 明确 Vercel 部署约束：
   - Vercel serverless 不适合承载长期 WebSocket 连接。
   - 后端应只保留短生命周期 HTTP 接口，例如签发 Ably token、写入房间状态、读取快照。
   - 客户端长期 realtime 连接交给 Ably Realtime SDK。
-- [ ] 明确迁移原则：
+- [x] 明确迁移原则：
   - 不在浏览器暴露 Ably root key。
   - 后端通过环境变量 `ABLY_ROOT_KEY` 读取 Ably root key。
   - 客户端只通过后端接口获取短期 Ably token。
@@ -44,48 +44,48 @@
 
 ### 1.1 依赖与配置
 
-- [ ] 添加 Go SDK 依赖：
+- [x] 添加 Go SDK 依赖：
   - 包名：`github.com/ably/ably-go/ably`
   - 命令：`go get github.com/ably/ably-go/ably@latest`
-- [ ] 扩展配置结构 `internal/config/config.go`：
-  - [ ] 新增字段：
+- [x] 扩展配置结构 `internal/config/config.go`：
+  - [x] 新增字段：
     - `AblyRootKey string`
     - `AblyTokenTTL time.Duration`
     - `AblyTokenTTLRaw string`
     - `AblyChannelPrefix string`
-  - [ ] 环境变量读取：
+  - [x] 环境变量读取：
     - `ABLY_ROOT_KEY`
     - `ABLY_TOKEN_TTL`，默认 `30m`
     - `ABLY_CHANNEL_PREFIX`，默认 `watchtogether`
-  - [ ] 配置校验：
+  - [x] 配置校验：
     - 在启用 Ably 实时能力时，`ABLY_ROOT_KEY` 必须非空。
     - `ABLY_TOKEN_TTL` 必须大于 0，且不超过 Ably access token 最大 TTL；初始值使用 `30m`。
-- [ ] 更新 `.env.example`：
-  - [ ] 增加：
+- [x] 更新 `.env.example`：
+  - [x] 增加：
     - `ABLY_ROOT_KEY=appId.keyId:keySecret`
     - `ABLY_TOKEN_TTL=30m`
     - `ABLY_CHANNEL_PREFIX=watchtogether`
-  - [ ] 注释说明：`ABLY_ROOT_KEY` 只能配置在服务端/Vercel Environment Variables，不可进入前端构建变量。
+  - [x] 注释说明：`ABLY_ROOT_KEY` 只能配置在服务端/Vercel Environment Variables，不可进入前端构建变量。
 
 ### 1.2 Ably 客户端封装
 
-- [ ] 新增内部包，建议路径：`internal/realtime/ably`
-- [ ] 定义服务结构：
-  - [ ] `type Service struct { rest *ably.REST; cfg config.Config }`
-  - [ ] `NewService(cfg config.Config) (*Service, error)`
-  - [ ] 使用 `ably.NewREST(ably.WithKey(cfg.AblyRootKey))` 创建 REST 客户端。
-- [ ] 定义统一 channel 命名：
-  - [ ] 房间控制频道：`{prefix}:room:{roomId}:control`
-  - [ ] 房间 presence 使用同一个控制频道的 presence，不再拆分额外 presence channel。
-  - [ ] 管理/系统频道预留：`{prefix}:admin`
-- [ ] 定义 Ably message name：
-  - [ ] `room.snapshot`
-  - [ ] `room.sync`
-  - [ ] `room.event`
-  - [ ] `room.error`
-  - [ ] `room.control`
-- [ ] 定义消息 payload，尽量复用 `internal/room.Message`：
-  - [ ] `type RoomRealtimeMessage struct`
+- [x] 新增内部包，建议路径：`internal/realtime/ably`
+- [x] 定义服务结构：
+  - [x] `type Service struct { rest *ably.REST; cfg config.Config }`
+  - [x] `NewService(cfg config.Config) (*Service, error)`
+  - [x] 使用 `ably.NewREST(ably.WithKey(cfg.AblyRootKey))` 创建 REST 客户端。
+- [x] 定义统一 channel 命名：
+  - [x] 房间控制频道：`{prefix}:room:{roomId}:control`
+  - [x] 房间 presence 使用同一个控制频道的 presence，不再拆分额外 presence channel。
+  - [x] 管理/系统频道预留：`{prefix}:admin`
+- [x] 定义 Ably message name：
+  - [x] `room.snapshot`
+  - [x] `room.sync`
+  - [x] `room.event`
+  - [x] `room.error`
+  - [x] `room.control`
+- [x] 定义消息 payload，尽量复用 `internal/room.Message`：
+  - [x] `type RoomRealtimeMessage struct`
     - `Type string`
     - `Action model.PlaybackAction`
     - `Event string`
@@ -95,34 +95,34 @@
     - `Timestamp int64`
     - `Payload any`
     - `User *room.User`
-  - [ ] 保持 JSON 字段名与当前 WebSocket 消息一致，方便前端平滑迁移。
+  - [x] 保持 JSON 字段名与当前 WebSocket 消息一致，方便前端平滑迁移。
 
 ### 1.3 替换现有 WebSocket Hub 职责
 
-- [ ] 拆分 `internal/room/hub.go` 现有职责：
-  - [ ] 保留可复用的领域类型：`User`、`Message`、`Snapshot`
-  - [ ] 提取房间状态写入逻辑：
+- [x] 拆分 `internal/room/hub.go` 现有职责：
+  - [x] 保留可复用的领域类型：`User`、`Message`、`Snapshot`
+  - [x] 提取房间状态写入逻辑：
     - 输入：roomId、当前用户、play_control payload
     - 输出：最新 `sync` message
     - 副作用：写入 `RoomStateCache`
-  - [ ] 移除或废弃长期连接管理：
+  - [x] 移除或废弃长期连接管理：
     - `gorilla/websocket.Upgrader`
     - `client.readPump`
     - `client.writePump`
     - `Hub.clients`
     - ping/pong 逻辑
-  - [ ] 直接删除旧 `/ws/room/:roomId` 路由，不保留本地/Docker 兼容实现。
-- [ ] 重新定义后端实时服务边界：
-  - [ ] 后端不再维护在线客户端列表。
-  - [ ] 在线成员列表由 Ably presence 管理。
-  - [ ] 播放控制写操作由 HTTP API 鉴权后落库并发布到 Ably。
-  - [ ] 播放控制实时订阅由客户端直接订阅 Ably channel。
-  - [ ] 普通成员只能订阅实时消息和进入 presence，不能通过 Ably publish 控制消息。
-- [ ] 调整 `room.Manager` 或替换为新的 `room.Service`：
-  - [ ] `Snapshot(ctx, roomId)` 从 `RoomStateCache` 读取状态。
-  - [ ] `Destroy(ctx, roomId)` 删除房间状态，并发布 `room.event` / `room.deleted` 到 Ably。
-  - [ ] `ApplyControl(ctx, roomId, user, request)` 验证权限、写状态、发布 `sync`。
-  - [ ] `PublishRoomEvent(ctx, roomId, event, user)` 发布用户加入/离开/踢出等事件。
+  - [x] 直接删除旧 `/ws/room/:roomId` 路由，不保留本地/Docker 兼容实现。
+- [x] 重新定义后端实时服务边界：
+  - [x] 后端不再维护在线客户端列表。
+  - [x] 在线成员列表由 Ably presence 管理。
+  - [x] 播放控制写操作由 HTTP API 鉴权后落库并发布到 Ably。
+  - [x] 播放控制实时订阅由客户端直接订阅 Ably channel。
+  - [x] 普通成员只能订阅实时消息和进入 presence，不能通过 Ably publish 控制消息。
+- [x] 调整 `room.Manager` 或替换为新的 `room.Service`：
+  - [x] `Snapshot(ctx, roomId)` 从 `RoomStateCache` 读取状态。
+  - [x] `Destroy(ctx, roomId)` 删除房间状态，并发布 `room.event` / `room.deleted` 到 Ably。
+  - [x] `ApplyControl(ctx, roomId, user, request)` 验证权限、写状态、发布 `sync`。
+  - [x] `PublishRoomEvent(ctx, roomId, event, user)` 发布用户加入/离开/踢出等事件。
 
 ### 1.4 后端接口设计
 
@@ -282,15 +282,15 @@
   - [ ] `ABLY_TOKEN_TTL`
   - [ ] `ABLY_CHANNEL_PREFIX`
   - [ ] 现有后端需要的 `POSTGRES_URL`、`REDIS_URL`、`JWT_SECRET` 等。
-- [ ] 后端只暴露 HTTP API：
-  - [ ] `/api/ably/token`
-  - [ ] `/api/rooms/:roomId/control`
-  - [ ] `/api/rooms/:roomId/snapshot`
-  - [ ] 现有 auth/room/video/download API
-- [ ] 删除 `/ws/room/:roomId`：
-  - [ ] README 明确：实时同步统一使用 Ably，不再提供后端 WebSocket 路由。
-  - [ ] 本地、Docker、Vercel 环境均不保留旧 WebSocket 兼容实现。
-- [ ] Ably root key 权限：
+- [x] 后端只暴露 HTTP API：
+  - [x] `/api/ably/token`
+  - [x] `/api/rooms/:roomId/control`
+  - [x] `/api/rooms/:roomId/snapshot`
+  - [x] 现有 auth/room/video/download API
+- [x] 删除 `/ws/room/:roomId`：
+  - [x] README 明确：实时同步统一使用 Ably，不再提供后端 WebSocket 路由。
+  - [x] 本地、Docker、Vercel 环境均不保留旧 WebSocket 兼容实现。
+- [x] Ably root key 权限：
   - [ ] root key 至少需要 `publish`、`subscribe`、`presence`、`history`、`channel-metadata` 中与 token 签发/发布相关能力。
   - [ ] 客户端 token 能力固定最小化为当前房间 channel 的 `subscribe`、`presence`、`history`。
 
@@ -521,16 +521,16 @@ export function useRoomRealtime(options: {
 
 ## 3. 迁移步骤建议
 
-- [ ] 第一阶段：后端基础设施
-  - [ ] 添加 Ably SDK 和配置。
-  - [ ] 新增 token 签发服务和 `/api/ably/token`。
-  - [ ] 新增 Ably publisher 抽象和 mock。
-  - [ ] 补齐配置/权限/capability 测试。
-- [ ] 第二阶段：后端控制链路
-  - [ ] 新增 `POST /api/rooms/:roomId/control`。
-  - [ ] 将原 `handleClientMessage` 的状态写入逻辑迁移为可复用函数。
-  - [ ] 发布 Ably `room.sync`。
-  - [ ] 增强 `kick` / `delete room` 的 Ably 事件发布。
+- [x] 第一阶段：后端基础设施
+  - [x] 添加 Ably SDK 和配置。
+  - [x] 新增 token 签发服务和 `/api/ably/token`。
+  - [x] 新增 Ably publisher 抽象和 mock。
+  - [x] 补齐配置/权限/capability 测试。
+- [x] 第二阶段：后端控制链路
+  - [x] 新增 `POST /api/rooms/:roomId/control`。
+  - [x] 将原 `handleClientMessage` 的状态写入逻辑迁移为可复用函数。
+  - [x] 发布 Ably `room.sync`。
+  - [x] 增强 `kick` / `delete room` 的 Ably 事件发布。
 - [ ] 第三阶段：前端 Ably 接入
   - [ ] 添加 `ably` npm 依赖。
   - [ ] 新增 `fetchAblyToken`、`sendRoomControl`、`fetchRoomSnapshot`。
@@ -542,13 +542,13 @@ export function useRoomRealtime(options: {
   - [ ] 部署前端，确认浏览器只连接 Ably，不连接后端 WebSocket。
   - [ ] 使用 Ably dashboard/CLI 观察 channel message 和 presence。
 - [ ] 第五阶段：清理与文档
-  - [ ] 删除 `/ws/room/:roomId` 路由和全部后端 WebSocket Hub/client 实现，不保留 deprecated 兼容入口。
-  - [ ] 移除 `gorilla/websocket` 依赖。
-  - [ ] 删除 SQLite 支持：
-    - [ ] 移除 `internal/store/sqlite`。
-    - [ ] 移除 `migrations` 中仅服务 SQLite 的迁移流程，或改为 Postgres-only 迁移。
-    - [ ] 移除 `config.StorageBackendSQLite`、`SQLitePath`、`SQLITE_PATH`。
-    - [ ] 更新 `docker-compose.dev.yml` 和本地启动文档为 Postgres-only。
-    - [ ] 更新测试套件，不再跑 SQLite store suite。
-  - [ ] 更新 README 核心接口列表。
-  - [ ] 更新部署文档和 `.env.example`。
+  - [x] 删除 `/ws/room/:roomId` 路由和全部后端 WebSocket Hub/client 实现，不保留 deprecated 兼容入口。
+  - [x] 移除 `gorilla/websocket` 依赖。
+  - [x] 删除 SQLite 支持：
+    - [x] 移除 `internal/store/sqlite`。
+    - [x] 移除 `migrations` 中仅服务 SQLite 的迁移流程，或改为 Postgres-only 迁移。
+    - [x] 移除 `config.StorageBackendSQLite`、`SQLitePath`、`SQLITE_PATH`。
+    - [x] 更新 `docker-compose.dev.yml` 和本地启动文档为 Postgres-only。
+    - [x] 更新测试套件，不再跑 SQLite store suite。
+  - [x] 更新 README 核心接口列表。
+  - [x] 更新部署文档和 `.env.example`。

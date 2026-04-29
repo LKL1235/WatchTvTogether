@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	StorageBackendSQLite   = "sqlite"
 	StorageBackendPostgres = "postgres"
 	CacheBackendMemory     = "memory"
 	CacheBackendRedis      = "redis"
@@ -21,40 +20,44 @@ const (
 type Config struct {
 	Addr           string `yaml:"addr"`
 	StorageBackend string `yaml:"storage_backend"`
-	SQLitePath     string `yaml:"sqlite_path"`
 	PostgresDSN    string `yaml:"postgres_dsn"`
 	CacheBackend   string `yaml:"cache_backend"`
 	RedisAddr      string `yaml:"redis_addr"`
 	// RedisURL is optional; when set, it takes precedence over RedisAddr.
-	RedisURL         string        `yaml:"redis_url"`
-	JWTSecret        string        `yaml:"jwt_secret"`
-	JWTAccessTTL     time.Duration `yaml:"-"`
-	JWTRefreshTTL    time.Duration `yaml:"-"`
-	JWTAccessTTLRaw  string        `yaml:"jwt_access_ttl"`
-	JWTRefreshTTLRaw string        `yaml:"jwt_refresh_ttl"`
-	StorageDir       string        `yaml:"storage_dir"`
-	PosterDir        string        `yaml:"poster_dir"`
-	DownloadWorkers  int           `yaml:"download_workers"`
-	Aria2RPCURL      string        `yaml:"aria2_rpc_url"`
-	Aria2Secret      string        `yaml:"aria2_secret"`
-	CorsOrigins      []string      `yaml:"cors_origins"`
+	RedisURL          string        `yaml:"redis_url"`
+	JWTSecret         string        `yaml:"jwt_secret"`
+	JWTAccessTTL      time.Duration `yaml:"-"`
+	JWTRefreshTTL     time.Duration `yaml:"-"`
+	JWTAccessTTLRaw   string        `yaml:"jwt_access_ttl"`
+	JWTRefreshTTLRaw  string        `yaml:"jwt_refresh_ttl"`
+	StorageDir        string        `yaml:"storage_dir"`
+	PosterDir         string        `yaml:"poster_dir"`
+	DownloadWorkers   int           `yaml:"download_workers"`
+	Aria2RPCURL       string        `yaml:"aria2_rpc_url"`
+	Aria2Secret       string        `yaml:"aria2_secret"`
+	CorsOrigins       []string      `yaml:"cors_origins"`
+	AblyRootKey       string        `yaml:"ably_root_key"`
+	AblyTokenTTL      time.Duration `yaml:"-"`
+	AblyTokenTTLRaw   string        `yaml:"ably_token_ttl"`
+	AblyChannelPrefix string        `yaml:"ably_channel_prefix"`
 }
 
 func Default() Config {
 	return Config{
-		Addr:             ":8080",
-		StorageBackend:   StorageBackendSQLite,
-		SQLitePath:       "./data/watchtogether.db",
-		PostgresDSN:      "postgres://user:pass@localhost:5432/watchtogether?sslmode=disable",
-		CacheBackend:     CacheBackendMemory,
-		RedisAddr:        "localhost:6379",
-		JWTSecret:        "change-me-in-production",
-		JWTAccessTTLRaw:  "15m",
-		JWTRefreshTTLRaw: "168h",
-		StorageDir:       "./data/videos",
-		PosterDir:        "./data/posters",
-		DownloadWorkers:  2,
-		Aria2RPCURL:      "http://localhost:6800/jsonrpc",
+		Addr:              ":8080",
+		StorageBackend:    StorageBackendPostgres,
+		PostgresDSN:       "postgres://user:pass@localhost:5432/watchtogether?sslmode=disable",
+		CacheBackend:      CacheBackendMemory,
+		RedisAddr:         "localhost:6379",
+		JWTSecret:         "change-me-in-production",
+		JWTAccessTTLRaw:   "15m",
+		JWTRefreshTTLRaw:  "168h",
+		StorageDir:        "./data/videos",
+		PosterDir:         "./data/posters",
+		DownloadWorkers:   2,
+		Aria2RPCURL:       "http://localhost:6800/jsonrpc",
+		AblyTokenTTLRaw:   "30m",
+		AblyChannelPrefix: "watchtogether",
 	}
 }
 
@@ -96,7 +99,6 @@ func applyEnv(cfg *Config) {
 		cfg.Addr = ":" + portEnv
 	}
 	setString(&cfg.StorageBackend, "STORAGE_BACKEND")
-	setString(&cfg.SQLitePath, "SQLITE_PATH")
 	// Priority: POSTGRES_URL (Vercel) > POSTGRES_DSN > DATABASE_URL.
 	if v := strings.TrimSpace(os.Getenv("POSTGRES_URL")); v != "" {
 		cfg.PostgresDSN = v
@@ -117,6 +119,9 @@ func applyEnv(cfg *Config) {
 	setInt(&cfg.DownloadWorkers, "DOWNLOAD_WORKERS")
 	setString(&cfg.Aria2RPCURL, "ARIA2_RPC_URL")
 	setString(&cfg.Aria2Secret, "ARIA2_SECRET")
+	setString(&cfg.AblyRootKey, "ABLY_ROOT_KEY")
+	setString(&cfg.AblyTokenTTLRaw, "ABLY_TOKEN_TTL")
+	setString(&cfg.AblyChannelPrefix, "ABLY_CHANNEL_PREFIX")
 	if v := strings.TrimSpace(os.Getenv("CORS_ORIGINS")); v != "" {
 		cfg.CorsOrigins = splitCSV(v)
 	}
@@ -151,7 +156,7 @@ func (c *Config) normalize() error {
 	c.StorageBackend = strings.ToLower(strings.TrimSpace(c.StorageBackend))
 	c.CacheBackend = strings.ToLower(strings.TrimSpace(c.CacheBackend))
 	switch c.StorageBackend {
-	case StorageBackendSQLite, StorageBackendPostgres:
+	case StorageBackendPostgres:
 	default:
 		return fmt.Errorf("unsupported storage_backend %q", c.StorageBackend)
 	}
@@ -170,6 +175,21 @@ func (c *Config) normalize() error {
 	}
 	c.JWTAccessTTL = accessTTL
 	c.JWTRefreshTTL = refreshTTL
+	ablyTTL, err := parseDuration(c.AblyTokenTTLRaw)
+	if err != nil {
+		return fmt.Errorf("ably_token_ttl: %w", err)
+	}
+	if ablyTTL <= 0 {
+		return errors.New("ably_token_ttl must be greater than 0")
+	}
+	if ablyTTL > 24*time.Hour {
+		return errors.New("ably_token_ttl must not exceed 24h")
+	}
+	c.AblyTokenTTL = ablyTTL
+	c.AblyChannelPrefix = strings.TrimSpace(c.AblyChannelPrefix)
+	if c.AblyChannelPrefix == "" {
+		c.AblyChannelPrefix = "watchtogether"
+	}
 	if c.DownloadWorkers <= 0 {
 		c.DownloadWorkers = 2
 	}

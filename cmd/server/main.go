@@ -18,9 +18,9 @@ import (
 	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
 	"watchtogether/internal/download"
+	ablyrealtime "watchtogether/internal/realtime/ably"
 	"watchtogether/internal/store"
 	"watchtogether/internal/store/postgres"
-	"watchtogether/internal/store/sqlite"
 )
 
 type stores struct {
@@ -71,6 +71,11 @@ func run() error {
 	downloads := download.NewServiceWithOptions(st.downloadTasks, st.videos, cfg, caps, download.WithPubSub(ca.pubsub))
 	downloads.Start(rootCtx, cfg.DownloadWorkers)
 
+	realtime, err := ablyrealtime.NewService(cfg)
+	if err != nil {
+		return err
+	}
+
 	router := api.NewRouter(api.Dependencies{
 		Config:            cfg,
 		UserStore:         st.users,
@@ -80,6 +85,7 @@ func run() error {
 		SessionCache:      ca.sessions,
 		RoomStateCache:    ca.roomStates,
 		PubSub:            ca.pubsub,
+		Realtime:          realtime,
 		Capabilities:      caps,
 		DownloadService:   downloads,
 	})
@@ -113,18 +119,6 @@ func run() error {
 
 func newStores(cfg config.Config) (*stores, error) {
 	switch cfg.StorageBackend {
-	case "sqlite":
-		db, err := sqlite.Open(context.Background(), cfg.SQLitePath)
-		if err != nil {
-			return nil, err
-		}
-		return &stores{
-			db:            db,
-			users:         sqlite.NewUserStore(db),
-			rooms:         sqlite.NewRoomStore(db),
-			videos:        sqlite.NewVideoStore(db),
-			downloadTasks: sqlite.NewDownloadTaskStore(db),
-		}, nil
 	case "postgres":
 		db, err := postgres.Open(context.Background(), cfg.PostgresDSN)
 		if err != nil {

@@ -11,6 +11,7 @@ import (
 	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
 	"watchtogether/internal/download"
+	"watchtogether/internal/realtime"
 	roomhub "watchtogether/internal/room"
 	"watchtogether/internal/store"
 	"watchtogether/pkg/apierr"
@@ -26,6 +27,7 @@ type Dependencies struct {
 	SessionCache      cache.SessionCache
 	RoomStateCache    cache.RoomStateCache
 	PubSub            cache.PubSub
+	Realtime          realtime.Service
 	Capabilities      capabilities.Report
 	DownloadService   *download.Service
 }
@@ -34,7 +36,6 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
 	router.Use(cors.New(corsutil.GinConfig(deps.Config.CorsOrigins)))
-	roomhub.InitWebSocketCheckOrigin(deps.Config.CorsOrigins)
 
 	router.NoRoute(func(c *gin.Context) {
 		apierr.Abort(c, apierr.NotFound("route not found"))
@@ -52,13 +53,13 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	router.StaticFS("/static/posters", http.Dir(deps.Config.PosterDir))
 
 	authService := auth.NewService(deps.UserStore, deps.SessionCache, deps.Config)
-	hubs := roomhub.NewManager(deps.PubSub, deps.RoomStateCache)
+	rooms := roomhub.NewService(deps.RoomStateCache, deps.Realtime)
 	registerCapabilityRoutes(router, deps)
 	registerAuthRoutes(router, deps, authService)
-	registerRoomRoutes(router, deps, authService, hubs)
+	registerRoomRoutes(router, deps, authService, rooms)
 	registerDownloadRoutes(router, deps, authService)
 	registerVideoRoutes(router, deps, authService)
-	registerDebugRoutes(router, deps, authService, hubs)
+	registerDebugRoutes(router, deps, authService, rooms)
 
 	return router
 }
