@@ -97,10 +97,14 @@ func applyEnv(cfg *Config) {
 	}
 	setString(&cfg.StorageBackend, "STORAGE_BACKEND")
 	setString(&cfg.SQLitePath, "SQLITE_PATH")
-	setString(&cfg.PostgresDSN, "POSTGRES_DSN")
-	// Many hosts inject DATABASE_URL; use it when POSTGRES_DSN is unset.
-	if strings.TrimSpace(cfg.PostgresDSN) == "" {
-		setString(&cfg.PostgresDSN, "DATABASE_URL")
+	// Priority: POSTGRES_URL (Vercel) > POSTGRES_DSN > DATABASE_URL.
+	if v := strings.TrimSpace(os.Getenv("POSTGRES_URL")); v != "" {
+		cfg.PostgresDSN = v
+	} else if v := strings.TrimSpace(os.Getenv("POSTGRES_DSN")); v != "" {
+		cfg.PostgresDSN = v
+	} else if v := strings.TrimSpace(os.Getenv("DATABASE_URL")); v != "" {
+		// Many hosts inject DATABASE_URL as a fallback.
+		cfg.PostgresDSN = v
 	}
 	setString(&cfg.CacheBackend, "CACHE_BACKEND")
 	setString(&cfg.RedisAddr, "REDIS_ADDR")
