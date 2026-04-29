@@ -37,6 +37,7 @@ type Message struct {
 	Event     string               `json:"event,omitempty"`
 	Position  float64              `json:"position,omitempty"`
 	VideoID   string               `json:"video_id,omitempty"`
+	Queue     []string             `json:"queue,omitempty"`
 	Timestamp int64                `json:"timestamp,omitempty"`
 	Payload   any                  `json:"payload,omitempty"`
 	User      *User                `json:"user,omitempty"`
@@ -55,6 +56,14 @@ type Hub struct {
 	allowWrite  func(*User) bool
 	sub         <-chan []byte
 	unsubscribe func()
+}
+
+type Snapshot struct {
+	RoomID      string           `json:"room_id"`
+	State       *model.RoomState `json:"state,omitempty"`
+	Users       []User           `json:"users"`
+	Queue       []string         `json:"queue"`
+	ViewerCount int              `json:"viewer_count"`
 }
 
 type Manager struct {
@@ -90,6 +99,16 @@ func (m *Manager) Destroy(ctx context.Context, roomID string) error {
 		hub.Close()
 	}
 	return m.states.DeleteRoomState(ctx, roomID)
+}
+
+func (m *Manager) Snapshot(ctx context.Context, roomID string) Snapshot {
+	m.mu.Lock()
+	hub := m.hubs[roomID]
+	m.mu.Unlock()
+	if hub == nil {
+		return Snapshot{RoomID: roomID, Users: []User{}, Queue: []string{}}
+	}
+	return hub.Snapshot(ctx)
 }
 
 func newHub(roomID string, pubsub cache.PubSub, states cache.RoomStateCache, allowWrite func(*User) bool) *Hub {
@@ -137,8 +156,10 @@ func (h *Hub) Serve(ctx *gin.Context, user User) error {
 	}
 	c := &client{hub: h, conn: conn, send: make(chan []byte, 32), user: user}
 	h.add(c)
-	if state, err := h.states.GetRoomState(ctx.Request.Context(), h.roomID); err == nil {
-		_ = c.writeJSON(Message{Type: "sync", Action: state.Action, Position: state.Position, VideoID: state.VideoID, Timestamp: state.UpdatedAt.Unix()})
+	snapshot := h.Snapshot(ctx.Request.Context())
+	_ = c.writeJSON(Message{Type: "room_snapshot", Payload: snapshot})
+	if snapshot.State != nil {
+		_ = c.writeJSON(Message{Type: "sync", Action: snapshot.State.Action, Position: snapshot.State.Position, VideoID: snapshot.State.VideoID, Queue: snapshot.Queue, Timestamp: snapshot.State.UpdatedAt.Unix(), Payload: map[string]any{"queue": snapshot.Queue}})
 	}
 	h.publish(ctx.Request.Context(), Message{Type: "room_event", Event: "user_joined", User: &user})
 	go c.writePump()
@@ -160,6 +181,30 @@ func (h *Hub) remove(c *client) {
 	}
 	h.mu.Unlock()
 	h.publish(context.Background(), Message{Type: "room_event", Event: "user_left", User: &c.user})
+}
+
+func (h *Hub) Snapshot(ctx context.Context) Snapshot {
+	h.mu.RLock()
+	users := make([]User, 0, len(h.clients))
+	for c := range h.clients {
+		users = append(users, c.user)
+	}
+	h.mu.RUnlock()
+
+	snapshot := Snapshot{
+		RoomID:      h.roomID,
+		Users:       users,
+		Queue:       []string{},
+		ViewerCount: len(users),
+	}
+	if state, err := h.states.GetRoomState(ctx, h.roomID); err == nil {
+		snapshot.State = state
+		snapshot.Queue = append(snapshot.Queue, state.Queue...)
+		if len(snapshot.Queue) == 0 && state.VideoID != "" {
+			snapshot.Queue = []string{state.VideoID}
+		}
+	}
+	return snapshot
 }
 
 func (h *Hub) run(ctx context.Context) {
@@ -204,9 +249,14 @@ func (h *Hub) handleClientMessage(ctx context.Context, c *client, payload []byte
 		return errors.New("forbidden")
 	}
 	now := time.Now().UTC()
+	queue := append([]string(nil), msg.Queue...)
+	if len(queue) == 0 && msg.VideoID != "" {
+		queue = []string{msg.VideoID}
+	}
 	state := &model.RoomState{
 		RoomID:    h.roomID,
 		VideoID:   msg.VideoID,
+		Queue:     queue,
 		Action:    msg.Action,
 		Position:  msg.Position,
 		UpdatedBy: c.user.ID,
@@ -220,6 +270,7 @@ func (h *Hub) handleClientMessage(ctx context.Context, c *client, payload []byte
 		Action:    msg.Action,
 		Position:  msg.Position,
 		VideoID:   msg.VideoID,
+		Queue:     queue,
 		Timestamp: now.Unix(),
 		User:      &c.user,
 	})

@@ -18,7 +18,7 @@ import (
 )
 
 type Dependencies struct {
-	Config config.Config
+	Config            config.Config
 	UserStore         store.UserStore
 	RoomStore         store.RoomStore
 	VideoStore        store.VideoStore
@@ -58,6 +58,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	registerRoomRoutes(router, deps, authService, hubs)
 	registerDownloadRoutes(router, deps, authService)
 	registerVideoRoutes(router, deps, authService)
+	registerDebugRoutes(router, deps, authService, hubs)
 
 	return router
 }
