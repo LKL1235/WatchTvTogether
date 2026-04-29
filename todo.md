@@ -1,0 +1,533 @@
+# Ably 实时同步改造 TODO
+
+目标：将当前 Go 后端中的房间 WebSocket 实时同步能力迁移到 Ably，适配 Vercel serverless 部署环境，并为参考前端仓库 `LKL1235/WatchTvTogether-Web` 制定对应的 Vue 前端改造计划。
+
+参考资料：
+
+- Ably Go SDK 入门：https://ably.com/docs/getting-started/go
+- Ably Token Auth：https://ably.com/docs/auth/token
+- 前端参考仓库：https://github.com/LKL1235/WatchTvTogether-Web
+
+## 0. 当前状态与约束梳理
+
+- [ ] 盘点现有实时同步入口：
+  - 后端房间 WebSocket 路由：`GET /ws/room/:roomId`
+  - 路由注册位置：`internal/api/room_handlers.go`
+  - WebSocket/Hub 逻辑：`internal/room/hub.go`
+  - 房间状态读取接口：`GET /api/rooms/:roomId/state`
+  - 房间控制消息类型：
+    - 客户端发送：`play_control`
+    - 服务端广播：`room_snapshot`、`sync`、`room_event`、`error`
+- [ ] 盘点当前后端依赖：
+  - Gin HTTP API
+  - `gorilla/websocket`
+  - `cache.PubSub` 用于跨实例广播
+  - `cache.RoomStateCache` 用于持久化房间播放状态
+- [ ] 明确 Vercel 部署约束：
+  - Vercel serverless 不适合承载长期 WebSocket 连接。
+  - 后端应只保留短生命周期 HTTP 接口，例如签发 Ably token、写入房间状态、读取快照。
+  - 客户端长期 realtime 连接交给 Ably Realtime SDK。
+- [ ] 明确迁移原则：
+  - 不在浏览器暴露 Ably root key。
+  - 后端通过环境变量 `ABLY_ROOT_KEY` 读取 Ably root key。
+  - 客户端只通过后端接口获取短期 Ably token。
+  - 房间状态最终一致性仍以后端 `RoomStateCache` / 存储为准，Ably 负责实时分发。
+  - 尽量保持现有消息结构兼容，降低前端 RoomView 迁移成本。
+
+## 1. 后端 Ably SDK 接入计划
+
+### 1.1 依赖与配置
+
+- [ ] 添加 Go SDK 依赖：
+  - 包名：`github.com/ably/ably-go/ably`
+  - 命令：`go get github.com/ably/ably-go/ably@latest`
+- [ ] 扩展配置结构 `internal/config/config.go`：
+  - [ ] 新增字段：
+    - `AblyRootKey string`
+    - `AblyTokenTTL time.Duration`
+    - `AblyTokenTTLRaw string`
+    - 可选：`AblyChannelPrefix string`
+  - [ ] 环境变量读取：
+    - `ABLY_ROOT_KEY`
+    - 可选：`ABLY_TOKEN_TTL`，默认建议 `30m`
+    - 可选：`ABLY_CHANNEL_PREFIX`，默认建议 `watchtogether`
+  - [ ] 配置校验：
+    - 在启用 Ably 实时能力时，`ABLY_ROOT_KEY` 必须非空。
+    - `ABLY_TOKEN_TTL` 必须大于 0，且不超过 Ably access token 最大 TTL；短期建议 10 分钟到 1 小时。
+- [ ] 更新 `.env.example`：
+  - [ ] 增加：
+    - `ABLY_ROOT_KEY=appId.keyId:keySecret`
+    - `ABLY_TOKEN_TTL=30m`
+    - `ABLY_CHANNEL_PREFIX=watchtogether`
+  - [ ] 注释说明：`ABLY_ROOT_KEY` 只能配置在服务端/Vercel Environment Variables，不可进入前端构建变量。
+
+### 1.2 Ably 客户端封装
+
+- [ ] 新增内部包，建议路径：`internal/realtime/ably`
+- [ ] 定义服务结构：
+  - [ ] `type Service struct { rest *ably.REST; cfg config.Config }`
+  - [ ] `NewService(cfg config.Config) (*Service, error)`
+  - [ ] 使用 `ably.NewREST(ably.WithKey(cfg.AblyRootKey))` 创建 REST 客户端。
+- [ ] 定义统一 channel 命名：
+  - [ ] 房间控制频道：`{prefix}:room:{roomId}:control`
+  - [ ] 房间 presence 频道：优先复用控制频道的 presence；如需拆分则使用 `{prefix}:room:{roomId}:presence`
+  - [ ] 管理/系统频道预留：`{prefix}:admin`
+- [ ] 定义 Ably message name：
+  - [ ] `room.snapshot`
+  - [ ] `room.sync`
+  - [ ] `room.event`
+  - [ ] `room.error`
+  - [ ] `room.control`
+- [ ] 定义消息 payload，尽量复用 `internal/room.Message`：
+  - [ ] `type RoomRealtimeMessage struct`
+    - `Type string`
+    - `Action model.PlaybackAction`
+    - `Event string`
+    - `Position float64`
+    - `VideoID string`
+    - `Queue []string`
+    - `Timestamp int64`
+    - `Payload any`
+    - `User *room.User`
+  - [ ] 保持 JSON 字段名与当前 WebSocket 消息一致，方便前端平滑迁移。
+
+### 1.3 替换现有 WebSocket Hub 职责
+
+- [ ] 拆分 `internal/room/hub.go` 现有职责：
+  - [ ] 保留可复用的领域类型：`User`、`Message`、`Snapshot`
+  - [ ] 提取房间状态写入逻辑：
+    - 输入：roomId、当前用户、play_control payload
+    - 输出：最新 `sync` message
+    - 副作用：写入 `RoomStateCache`
+  - [ ] 移除或废弃长期连接管理：
+    - `gorilla/websocket.Upgrader`
+    - `client.readPump`
+    - `client.writePump`
+    - `Hub.clients`
+    - ping/pong 逻辑
+  - [ ] 保留兼容窗口时，可将旧 `/ws/room/:roomId` 返回 `410 Gone` 或文档化为 deprecated。
+- [ ] 重新定义后端实时服务边界：
+  - [ ] 后端不再维护在线客户端列表。
+  - [ ] 在线成员列表由 Ably presence 管理。
+  - [ ] 播放控制写操作由 HTTP API 鉴权后落库并发布到 Ably。
+  - [ ] 播放控制实时订阅由客户端直接订阅 Ably channel。
+- [ ] 调整 `room.Manager` 或替换为新的 `room.Service`：
+  - [ ] `Snapshot(ctx, roomId)` 从 `RoomStateCache` 读取状态。
+  - [ ] `Destroy(ctx, roomId)` 删除房间状态；可选发布 `room.event` / `room.deleted` 到 Ably。
+  - [ ] `ApplyControl(ctx, roomId, user, request)` 验证权限、写状态、发布 `sync`。
+  - [ ] `PublishRoomEvent(ctx, roomId, event, user)` 发布用户加入/离开/踢出等事件。
+
+### 1.4 后端接口设计
+
+#### 1.4.1 签发 Ably 临时 token
+
+- [ ] 新增接口：`POST /api/ably/token`
+- [ ] 鉴权：必须携带当前后端 access token，即复用 `requireAuth(authService)`。
+- [ ] 请求体建议：
+
+```json
+{
+  "room_id": "room_uuid",
+  "purpose": "room"
+}
+```
+
+- [ ] 响应体建议直接返回 Ably `TokenDetails` 兼容结构：
+
+```json
+{
+  "token": "ably_token",
+  "expires": 1710000000000,
+  "issued": 1709998200000,
+  "capability": "{\"watchtogether:room:ROOM_ID:control\":[\"publish\",\"subscribe\",\"presence\",\"history\"]}",
+  "clientId": "USER_ID"
+}
+```
+
+- [ ] token 参数设计：
+  - [ ] `ClientID`：当前登录用户 ID。
+  - [ ] `TTL`：来自 `ABLY_TOKEN_TTL`，默认 `30m`。
+  - [ ] `Capability`：
+    - 普通已登录用户：
+      - 当前房间 channel：`subscribe`、`presence`
+      - 如果允许客户端直接发控制消息，则需要 `publish`，但推荐后端控制接口发布。
+    - 房主/管理员：
+      - 当前房间 channel：`publish`、`subscribe`、`presence`、`history`
+    - 若采用「所有控制写入必须走后端 HTTP」方案：
+      - 所有客户端 token 仅授予 `subscribe`、`presence`、`history`
+      - 后端使用 root key 发布 `sync`
+  - [ ] 建议优先选择后端 HTTP 控制方案，避免客户端伪造房主控制消息。
+- [ ] 安全校验：
+  - [ ] 校验 `room_id` 存在。
+  - [ ] 私有房间必须要求用户已经通过 `POST /api/rooms/:roomId/join`，如当前系统没有成员表，需要补充成员/加入记录设计，或短期内仅按登录态 + 房间存在校验。
+  - [ ] 房主/管理员能力根据 `room.owner_id` 与用户 role 判定。
+  - [ ] 不允许客户端传入任意 capability。
+  - [ ] 不在日志中打印 `ABLY_ROOT_KEY` 或签发 token。
+- [ ] 失败状态码：
+  - [ ] `401`：未登录或 access token 无效。
+  - [ ] `403`：无权访问房间。
+  - [ ] `404`：房间不存在。
+  - [ ] `500`：Ably SDK 签发失败或服务端未配置 root key。
+
+#### 1.4.2 播放控制 HTTP 接口
+
+- [ ] 新增接口：`POST /api/rooms/:roomId/control`
+- [ ] 鉴权：必须登录。
+- [ ] 权限：仅房主或管理员可控制，沿用当前 `canManageRoom`。
+- [ ] 请求体：
+
+```json
+{
+  "action": "play",
+  "position": 12.34,
+  "video_id": "video_uuid_or_url",
+  "queue": ["video_id_1", "video_id_2"]
+}
+```
+
+- [ ] 服务端处理流程：
+  - [ ] 读取 room。
+  - [ ] 校验当前用户是否房主或管理员。
+  - [ ] 标准化 queue：如果 queue 为空且 video_id 非空，则 queue 为 `[video_id]`。
+  - [ ] 写入 `RoomStateCache.SetRoomState`。
+  - [ ] 使用 Ably REST publish 到房间 channel：
+    - `name`: `room.sync`
+    - `data`: 与当前 WebSocket `sync` 消息兼容。
+  - [ ] 返回最新状态，便于控制端本地确认。
+- [ ] 响应体：
+
+```json
+{
+  "type": "sync",
+  "action": "play",
+  "position": 12.34,
+  "video_id": "video_uuid_or_url",
+  "queue": ["video_id_1", "video_id_2"],
+  "timestamp": 1710000000,
+  "user": {
+    "id": "user_id",
+    "username": "alice",
+    "role": "admin",
+    "is_owner": true
+  }
+}
+```
+
+#### 1.4.3 房间快照接口
+
+- [ ] 保留并增强现有接口：`GET /api/rooms/:roomId/state`
+- [ ] 新增接口：`GET /api/rooms/:roomId/snapshot`，用于前端进入房间时一次性获取完整初始化数据。
+- [ ] 响应体建议：
+
+```json
+{
+  "room_id": "room_uuid",
+  "state": {
+    "room_id": "room_uuid",
+    "video_id": "video_uuid",
+    "queue": ["video_uuid"],
+    "action": "pause",
+    "position": 0,
+    "updated_by": "user_id",
+    "updated_at": "2026-04-29T09:15:00Z"
+  },
+  "queue": ["video_uuid"],
+  "viewer_count": 0,
+  "ably": {
+    "channel": "watchtogether:room:room_uuid:control",
+    "token_endpoint": "/api/ably/token"
+  }
+}
+```
+
+- [ ] 在线用户列表处理：
+  - [ ] 不再由后端 Hub 内存维护。
+  - [ ] 前端进入 Ably presence 后通过 `channel.presence.get()` 获取当前在线成员。
+  - [ ] 如需要后端快照包含 users，可用 Ably REST presence 查询；但 Vercel serverless 中建议让前端直接读取 presence，减少接口耦合。
+
+#### 1.4.4 房间成员事件与踢人
+
+- [ ] 保留接口：`POST /api/rooms/:roomId/kick/:uid`
+- [ ] 增强行为：
+  - [ ] 校验房主/管理员权限。
+  - [ ] 发布 Ably message：
+    - `name`: `room.event`
+    - `data`: `{ "type": "room_event", "event": "user_kicked", "user": { ... } }`
+  - [ ] 前端收到 `user_kicked` 且 user.id 为自己时自动离开房间并提示。
+- [ ] 评估是否需要服务端维护成员表：
+  - [ ] 当前系统只有房间创建/加入校验，没有持久成员关系。
+  - [ ] 若要严格控制私有房间 token 签发，需要新增 `room_members` 或 session-level join cache。
+  - [ ] 短期计划可先沿用现状：私有房间通过 join 成功后进入页面，token 接口只校验登录和房间存在；后续补成员表加强。
+
+### 1.5 Vercel 部署事项
+
+- [ ] 在 Vercel 项目环境变量中配置：
+  - [ ] `ABLY_ROOT_KEY`
+  - [ ] `ABLY_TOKEN_TTL`
+  - [ ] `ABLY_CHANNEL_PREFIX`
+  - [ ] 现有后端需要的 `POSTGRES_URL`、`REDIS_URL`、`JWT_SECRET` 等。
+- [ ] 后端只暴露 HTTP API：
+  - [ ] `/api/ably/token`
+  - [ ] `/api/rooms/:roomId/control`
+  - [ ] `/api/rooms/:roomId/snapshot`
+  - [ ] 现有 auth/room/video/download API
+- [ ] 废弃 Vercel 上的 `/ws/room/:roomId`：
+  - [ ] README 明确：Vercel 环境不支持该 WebSocket 路由，客户端必须使用 Ably。
+  - [ ] 可选：在非 Vercel/本地环境保留旧 WebSocket 作为兼容，但不建议继续维护两套实时实现。
+- [ ] 评估 Ably root key 权限：
+  - [ ] root key 至少需要 `publish`、`subscribe`、`presence`、`history`、`channel-metadata` 中与 token 签发/发布相关能力。
+  - [ ] 客户端 token 能力应按房间 channel 最小化。
+
+### 1.6 后端测试计划
+
+- [ ] 单元测试：
+  - [ ] `config.Load` 能读取 `ABLY_ROOT_KEY`、`ABLY_TOKEN_TTL`。
+  - [ ] capability 生成只允许目标 room channel。
+  - [ ] 普通用户/房主/管理员 capability 差异正确。
+  - [ ] `POST /api/rooms/:roomId/control` 权限校验正确。
+- [ ] 集成测试：
+  - [ ] mock Ably publisher，验证控制接口写入 `RoomStateCache` 后发布 `room.sync`。
+  - [ ] `POST /api/ably/token` 在缺少 root key 时返回明确错误。
+  - [ ] 私有房间鉴权路径覆盖。
+- [ ] 手动验证：
+  - [ ] 使用 Ably dashboard 或 Ably CLI 订阅房间 channel。
+  - [ ] 调用控制接口后能看到 `room.sync`。
+  - [ ] 客户端 token 只能订阅自己的房间 channel，不能订阅其他房间。
+
+## 2. 前端改造计划（基于 LKL1235/WatchTvTogether-Web）
+
+当前参考前端为 Vue + Vite + Pinia，关键文件：
+
+- `src/api.ts`：HTTP API 封装
+- `src/types.ts`：类型定义
+- `src/composables/useRoomSocket.ts`：当前原生 WebSocket composable
+- `src/views/RoomView.vue`：房间播放、队列、成员和实时事件 UI
+- `src/stores/auth.ts`：保存后端 access token
+
+### 2.1 依赖与环境变量
+
+- [ ] 添加 Ably 前端 SDK：
+  - [ ] `npm install ably@latest`
+- [ ] 新增前端环境变量：
+  - [ ] `VITE_API_BASE=https://your-backend.vercel.app`
+  - [ ] 不添加 `VITE_ABLY_ROOT_KEY`，禁止将 root key 注入前端。
+- [ ] 更新前端 README：
+  - [ ] 说明实时连接由 Ably 处理。
+  - [ ] 说明前端通过后端 `/api/ably/token` 自动续签。
+
+### 2.2 API 封装改造
+
+- [ ] 在 `src/api.ts` 新增：
+
+```ts
+export function fetchAblyToken(token: string, input: { room_id: string; purpose: 'room' }) {
+  return apiFetch<AblyTokenDetails>('/api/ably/token', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, token)
+}
+
+export function sendRoomControl(
+  token: string,
+  roomId: string,
+  input: { action: PlaybackAction; position: number; video_id: string; queue?: string[] },
+) {
+  return apiFetch<RoomSocketMessage>(`/api/rooms/${roomId}/control`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, token)
+}
+
+export function fetchRoomSnapshot(token: string, roomId: string) {
+  return apiFetch<RoomSnapshotPayload>(`/api/rooms/${roomId}/snapshot`, {}, token)
+}
+```
+
+- [ ] 在 `src/types.ts` 新增/调整：
+  - [ ] `PlaybackAction`
+  - [ ] `RoomRealtimeMessage`
+  - [ ] `AblyTokenDetails`
+  - [ ] `RoomPresenceData`
+  - [ ] `RoomSnapshotPayload` 保持兼容当前字段。
+- [ ] 将 `RoomSocketMessage` 从 `useRoomSocket.ts` 移到 `types.ts`，避免 composable 与页面互相耦合。
+
+### 2.3 替换 useRoomSocket
+
+- [ ] 将 `src/composables/useRoomSocket.ts` 重命名或替换为 `src/composables/useRoomRealtime.ts`。
+- [ ] 新 composable 输入：
+
+```ts
+export function useRoomRealtime(options: {
+  roomId: () => string
+  accessToken: () => string
+  currentUser: () => User | null
+  canPublishControl: () => boolean
+})
+```
+
+- [ ] composable 状态：
+  - [ ] `connected`
+  - [ ] `connecting`
+  - [ ] `connectionState`
+  - [ ] `lastMessage`
+  - [ ] `events`
+  - [ ] `members`
+  - [ ] `error`
+- [ ] Ably client 初始化：
+  - [ ] 使用 `new Ably.Realtime({ authCallback })` 或 `authUrl`。
+  - [ ] `authCallback` 调用后端 `fetchAblyToken(accessToken, { room_id, purpose: 'room' })`。
+  - [ ] `clientId` 由后端 token 决定，不在前端伪造。
+  - [ ] 自动续签交给 Ably SDK。
+- [ ] 频道连接：
+  - [ ] channel 名称来自后端 snapshot 返回的 `ably.channel`，或前端按同一规则生成。
+  - [ ] 订阅 `room.sync`、`room.event`、`room.snapshot`。
+  - [ ] 使用 `channel.presence.enter({ username, role, is_owner })` 进入 presence。
+  - [ ] 使用 `channel.presence.subscribe()` 维护成员列表。
+  - [ ] 首次进入后调用 `channel.presence.get()` 补齐在线成员。
+- [ ] 控制发送：
+  - [ ] 推荐不直接 `channel.publish('room.control')`。
+  - [ ] `sendControl` 改为调用后端 `POST /api/rooms/:roomId/control`。
+  - [ ] 后端校验权限、写状态、发布 Ably `room.sync`。
+  - [ ] 控制端收到接口响应后可本地 optimistic sync；最终以 Ably `room.sync` 为准。
+- [ ] 连接清理：
+  - [ ] 组件卸载时 `presence.leave()`。
+  - [ ] 取消订阅。
+  - [ ] `client.close()`。
+
+### 2.4 RoomView.vue 页面逻辑改造
+
+- [ ] 替换导入：
+  - [ ] `useRoomSocket` -> `useRoomRealtime`
+  - [ ] `fetchRoomState` -> 优先 `fetchRoomSnapshot`
+  - [ ] 新增 `sendRoomControl`
+- [ ] 页面初始化流程：
+  - [ ] 进入页面时并行加载：
+    - `fetchRoomSnapshot`
+    - `fetchVideos`
+  - [ ] 用 snapshot 初始化：
+    - `state`
+    - `position`
+    - `currentVideo`
+    - `queue`
+    - Ably channel name
+  - [ ] 初始化后连接 `useRoomRealtime.connect()`。
+- [ ] 实时消息处理：
+  - [ ] `room.sync`：
+    - 更新 `state`
+    - 更新 `position`
+    - 更新 `currentVideo`
+    - 更新 `queue`
+    - 调用 `syncPlayer`
+  - [ ] `room.event`：
+    - `user_joined` / `user_left` 逐步改为 presence 驱动，事件仅用于提示。
+    - `user_kicked` 命中当前用户时离开房间。
+    - `room_deleted` 命中当前房间时返回大厅。
+  - [ ] `room.snapshot`：
+    - 用于服务端强制重同步或调试，不作为常规进入房间的唯一来源。
+- [ ] 在线成员 UI：
+  - [ ] `members` 改由 `useRoomRealtime.members` 提供。
+  - [ ] 显示 Ably connection state：
+    - `initialized`
+    - `connecting`
+    - `connected`
+    - `disconnected`
+    - `suspended`
+    - `failed`
+  - [ ] 断线时提示「正在重连实时同步」。
+- [ ] 播放控制按钮：
+  - [ ] `send(action)` 内不再调用 `socket.sendControl`。
+  - [ ] 调用 `sendRoomControl(auth.accessToken.value, roomId, payload)`。
+  - [ ] 成功后可立即本地 `syncPlayer(action, position)`，并等待 Ably 广播确认。
+  - [ ] 失败时显示权限或网络错误。
+- [ ] 事件调试区域：
+  - [ ] 当前页面已有「实时事件」区域，可继续展示最近 Ably messages。
+  - [ ] 增加 connection state、channel name，方便 Vercel/Ably 联调。
+
+### 2.5 Auth 与 token 续签
+
+- [ ] `src/stores/auth.ts` 保持后端 JWT access token/refresh token 逻辑。
+- [ ] Ably token 不进入 localStorage。
+- [ ] Ably token 通过 `authCallback` 临时获取，由 SDK 内存管理和续签。
+- [ ] 当后端 access token 过期导致 Ably token endpoint 返回 `401`：
+  - [ ] 短期：提示用户重新登录。
+  - [ ] 后续：在 `apiFetch` 中加入 refresh token 自动刷新，再重试 token endpoint。
+
+### 2.6 前端页面设计补充
+
+- [ ] 房间页顶部状态条：
+  - [ ] 展示「实时同步：已连接 / 重连中 / 失败」。
+  - [ ] 展示在线人数，来自 presence 成员数量。
+  - [ ] 失败时提供「重新连接」按钮。
+- [ ] 成员侧栏：
+  - [ ] 成员项展示：
+    - 用户名
+    - 房主/管理员标识
+    - presence 状态
+  - [ ] 房主/管理员可点击「踢出」。
+  - [ ] 被踢用户弹窗提示并返回大厅。
+- [ ] 队列区域：
+  - [ ] 非控制用户仍可查看队列，但按钮置灰。
+  - [ ] 控制用户调整队列后通过控制接口同步。
+  - [ ] 同步失败时回滚本地队列或重新拉取 snapshot。
+- [ ] 视频播放器：
+  - [ ] 避免普通用户本地 `play/pause/seek` 误触发广播。
+  - [ ] 控制用户点击播放/暂停/同步进度时才调用控制接口。
+  - [ ] 收到远端 sync 时处理浏览器 autoplay 限制，失败时显示「点击继续播放」提示。
+- [ ] 调试/开发模式：
+  - [ ] 在开发环境显示最近 5 条 Ably 消息。
+  - [ ] 生产环境可折叠或隐藏调试信息。
+
+### 2.7 前端测试计划
+
+- [ ] 单元测试：
+  - [ ] `useRoomRealtime` authCallback 会调用 `/api/ably/token`。
+  - [ ] presence enter/update/leave 能正确更新 members。
+  - [ ] `room.sync` 消息能正确更新 RoomView 状态。
+- [ ] 手动联调：
+  - [ ] 两个浏览器账号进入同一房间。
+  - [ ] 房主播放/暂停/seek，另一端同步。
+  - [ ] 房主调整队列，另一端同步队列和当前视频。
+  - [ ] 普通成员控制按钮置灰，直接调用控制接口返回 `403`。
+  - [ ] 断网/刷新页面后 Ably 自动重连并拉取当前 snapshot。
+  - [ ] Vercel 部署环境下确认不再访问 `/ws/room/:roomId`。
+
+## 3. 迁移步骤建议
+
+- [ ] 第一阶段：后端基础设施
+  - [ ] 添加 Ably SDK 和配置。
+  - [ ] 新增 token 签发服务和 `/api/ably/token`。
+  - [ ] 新增 Ably publisher 抽象和 mock。
+  - [ ] 补齐配置/权限/capability 测试。
+- [ ] 第二阶段：后端控制链路
+  - [ ] 新增 `POST /api/rooms/:roomId/control`。
+  - [ ] 将原 `handleClientMessage` 的状态写入逻辑迁移为可复用函数。
+  - [ ] 发布 Ably `room.sync`。
+  - [ ] 增强 `kick` / `delete room` 的 Ably 事件发布。
+- [ ] 第三阶段：前端 Ably 接入
+  - [ ] 添加 `ably` npm 依赖。
+  - [ ] 新增 `fetchAblyToken`、`sendRoomControl`、`fetchRoomSnapshot`。
+  - [ ] 替换 `useRoomSocket` 为 `useRoomRealtime`。
+  - [ ] RoomView 接入 presence 和 Ably messages。
+- [ ] 第四阶段：Vercel 联调
+  - [ ] 配置 Vercel 环境变量。
+  - [ ] 部署后端，确认 token endpoint 可用。
+  - [ ] 部署前端，确认浏览器只连接 Ably，不连接后端 WebSocket。
+  - [ ] 使用 Ably dashboard/CLI 观察 channel message 和 presence。
+- [ ] 第五阶段：清理与文档
+  - [ ] 移除或标记 deprecated：`/ws/room/:roomId`。
+  - [ ] 移除 `gorilla/websocket` 依赖（如果没有其他用途）。
+  - [ ] 更新 README 核心接口列表。
+  - [ ] 更新部署文档和 `.env.example`。
+
+## 4. 待确认问题
+
+- [ ] 是否允许普通成员发布控制消息？
+  - 建议：不允许；所有播放控制通过后端 HTTP 接口校验房主/管理员权限。
+- [ ] 私有房间是否需要持久成员关系？
+  - 建议：后续增加 `room_members`，否则 token 签发无法严格判断用户是否已输入过房间密码。
+- [ ] 是否需要保留本地/Docker 环境旧 WebSocket？
+  - 建议：不保留长期双实现；若需要过渡，明确标记旧路由 deprecated。
+- [ ] Ably channel 是否需要 history？
+  - 建议：短期授予 `history` 便于重连补消息；长期仍以 `/snapshot` 作为权威初始化来源。
+- [ ] 多端同账号同时在线如何展示？
+  - 建议：presence data 增加 `connectionId` 或设备名，UI 聚合为同一用户或展示多设备状态。
