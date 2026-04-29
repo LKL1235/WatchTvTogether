@@ -10,35 +10,32 @@
 
 ## 0. 当前状态与约束梳理
 
-- [x] 盘点现有实时同步入口：
-  - 后端房间 WebSocket 路由：`GET /ws/room/:roomId`
-  - 路由注册位置：`internal/api/room_handlers.go`
-  - WebSocket/Hub 逻辑：`internal/room/hub.go`
-  - 房间状态读取接口：`GET /api/rooms/:roomId/state`
-  - 房间控制消息类型：
-    - 客户端发送：`play_control`
-    - 服务端广播：`room_snapshot`、`sync`、`room_event`、`error`
-- [x] 盘点当前后端依赖：
-  - Gin HTTP API
-  - `gorilla/websocket`
-  - `cache.PubSub` 用于跨实例广播
-  - `cache.RoomStateCache` 用于持久化房间播放状态
-- [x] 明确 Vercel 部署约束：
-  - Vercel serverless 不适合承载长期 WebSocket 连接。
-  - 后端应只保留短生命周期 HTTP 接口，例如签发 Ably token、写入房间状态、读取快照。
-  - 客户端长期 realtime 连接交给 Ably Realtime SDK。
-- [x] 明确迁移原则：
-  - 不在浏览器暴露 Ably root key。
-  - 后端通过环境变量 `ABLY_ROOT_KEY` 读取 Ably root key。
-  - 客户端只通过后端接口获取短期 Ably token。
-  - 普通成员不允许发布播放控制消息；所有播放控制写入必须走后端 HTTP 接口，由后端校验房主/管理员权限后使用 root key 发布 Ably 消息。
-  - 私有房间不维护持久成员关系；每次进入房间都要验证密码，房主和管理员不需要输入密码。
-  - 不保留本地/Docker 环境旧 WebSocket 实现，迁移完成后直接删除 `/ws/room/:roomId` 及相关 Hub/client 代码。
-  - 删除 SQLite 支持，后续后端只保留 Postgres 存储实现。
-  - 房间状态最终一致性仍以后端 `RoomStateCache` / 存储为准，Ably 负责实时分发。
-  - Ably channel 短期授予 `history` 便于重连补消息；长期仍以 `/snapshot` 作为权威初始化来源。
-  - presence data 增加 `connectionId` 或设备名，前端 UI 需要能按用户聚合多设备或展示多设备状态。
-  - 尽量保持现有消息结构兼容，降低前端 RoomView 迁移成本。
+- [x] 当前后端实时同步边界：
+  - 后端不再提供任何长期 WebSocket 路由，包括旧的 `GET /ws/room/:roomId`。
+  - 房间实时同步统一交给 Ably Realtime；后端只负责短生命周期 HTTP API。
+  - 后端通过 `ABLY_ROOT_KEY` 使用 Ably REST 发布房间消息，root key 只能配置在服务端环境变量中。
+  - 当前后端核心接口：
+    - `POST /api/ably/token`：为当前登录用户签发指定房间的 Ably 临时 token。
+    - `POST /api/rooms/:roomId/control`：房主/管理员提交播放控制，后端校验、写入状态并发布 `room.sync`。
+    - `POST /api/rooms/:roomId/snapshot`：客户端进入房间时读取权威初始化快照。
+    - `GET /api/rooms/:roomId/state`：保留为轻量播放状态读取接口。
+- [x] 当前后端存储与状态约束：
+  - 后端只保留 Postgres 存储实现，不再保留 SQLite 本地兼容路径。
+  - 播放状态最终一致性以后端 `RoomStateCache` / 存储为准。
+  - Ably 负责实时分发，不作为权威持久状态来源。
+  - 在线成员列表不再由后端内存 Hub 维护，客户端应使用 Ably presence。
+- [x] 客户端接入注意事项：
+  - 浏览器绝不能持有或暴露 `ABLY_ROOT_KEY`，也不要配置任何 `VITE_ABLY_ROOT_KEY`。
+  - 客户端必须使用后端 JWT 调用 `POST /api/ably/token` 获取短期 Ably token。
+  - 后端签发的客户端 token 只授予当前房间 channel 的 `subscribe`、`presence`、`history`，不授予 `publish`。
+  - 客户端不能直接向 Ably publish 播放控制；播放/暂停/seek/队列变更必须调用 `POST /api/rooms/:roomId/control`。
+  - 房间初始化应先调用 `POST /api/rooms/:roomId/snapshot`，再连接 Ably channel 订阅 `room.sync`、`room.event`、`room.snapshot`。
+  - 重连补消息可使用 Ably `history`，但长期校准仍应重新拉取 snapshot。
+  - 私有房间不维护持久成员关系；普通成员每次进入、拉取 snapshot、续签 Ably token 都需要本次房间密码。
+  - 私有房间密码只应保存在当前页面运行期内存中，离开房间、刷新页面或关闭标签页后清空。
+  - 房主和管理员访问私有房间时不需要提交房间密码。
+  - presence data 建议包含 `connectionId` 或设备名，前端 UI 需要支持同一用户多设备聚合或展示。
+  - 实时消息 payload 尽量沿用旧 `sync`、`room_event` 等 JSON 字段，降低 RoomView 迁移成本。
 
 ## 1. 后端 Ably SDK 接入计划
 
