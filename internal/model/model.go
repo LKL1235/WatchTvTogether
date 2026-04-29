@@ -95,6 +95,7 @@ const (
 type RoomState struct {
 	RoomID    string         `json:"room_id"`
 	VideoID   string         `json:"video_id,omitempty"`
+	Queue     []string       `json:"queue,omitempty"`
 	Action    PlaybackAction `json:"action"`
 	Position  float64        `json:"position"`
 	UpdatedBy string         `json:"updated_by,omitempty"`

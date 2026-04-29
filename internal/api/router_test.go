@@ -28,7 +28,8 @@ import (
 func TestAuthRoomAndWebSocketFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := openTestDB(t)
-	router := NewRouter(testDeps(db))
+	deps := testDeps(db)
+	router := NewRouter(deps)
 	server := httptest.NewServer(router)
 	defer server.Close()
 
@@ -68,11 +69,16 @@ func TestAuthRoomAndWebSocketFlow(t *testing.T) {
 		"action":   "seek",
 		"position": 42.5,
 		"video_id": "video-1",
+		"queue":    []string{"video-1", "video-2"},
 	})
 
 	msg := readUntil(t, memberWS, "sync")
 	if msg["action"] != "seek" || msg["video_id"] != "video-1" {
 		t.Fatalf("unexpected sync message: %#v", msg)
+	}
+	queue, _ := msg["queue"].([]any)
+	if len(queue) != 2 || queue[1] != "video-2" {
+		t.Fatalf("unexpected sync queue: %#v", msg)
 	}
 
 	state := getJSON(t, server.URL+"/api/rooms/"+roomID+"/state", ownerAccess)
@@ -81,6 +87,53 @@ func TestAuthRoomAndWebSocketFlow(t *testing.T) {
 	}
 	if got := numericField(t, state.Body.Bytes(), "position"); got != 42.5 {
 		t.Fatalf("state position = %v", got)
+	}
+	if got := stringSliceField(t, state.Body.Bytes(), "queue"); len(got) != 2 || got[1] != "video-2" {
+		t.Fatalf("state queue = %#v body = %s", got, state.Body.String())
+	}
+
+	late := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
+		"username": "late",
+		"password": "password123",
+	})
+	lateAccess := tokenFrom(t, late.Body.Bytes(), "access_token")
+	lateWS := dialRoom(t, server.URL, roomID, lateAccess)
+	defer lateWS.Close()
+	snapshot := readUntil(t, lateWS, "room_snapshot")
+	payload, _ := snapshot["payload"].(map[string]any)
+	if numeric, _ := payload["viewer_count"].(float64); numeric != 3 {
+		t.Fatalf("snapshot viewer_count = %#v", snapshot)
+	}
+	if got, _ := payload["queue"].([]any); len(got) != 2 || got[0] != "video-1" {
+		t.Fatalf("snapshot queue = %#v", snapshot)
+	}
+
+	owner, err := deps.UserStore.GetByID(context.Background(), userIDFrom(t, register.Body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.Role = model.UserRoleAdmin
+	if err := deps.UserStore.Update(context.Background(), owner); err != nil {
+		t.Fatal(err)
+	}
+	adminLogin := postJSON(t, server.URL+"/api/auth/login", "", map[string]string{
+		"username": "owner",
+		"password": "password123",
+	})
+	adminToken := tokenFrom(t, adminLogin.Body.Bytes(), "access_token")
+	debug := getJSON(t, server.URL+"/api/admin/debug/rooms", adminToken)
+	if debug.Code != http.StatusOK {
+		t.Fatalf("debug rooms status = %d body = %s", debug.Code, debug.Body.String())
+	}
+	items := objectSliceField(t, debug.Body.Bytes(), "items")
+	if len(items) != 1 {
+		t.Fatalf("debug rooms items = %#v", items)
+	}
+	if got, _ := items[0]["viewer_count"].(float64); got != 3 {
+		t.Fatalf("debug room viewer_count = %#v", items[0])
+	}
+	if got, _ := items[0]["queue"].([]any); len(got) != 2 || got[1] != "video-2" {
+		t.Fatalf("debug room queue = %#v", items[0])
 	}
 }
 
@@ -363,6 +416,36 @@ func boolField(t *testing.T, body []byte, field string) bool {
 	}
 	value, _ := payload[field].(bool)
 	return value
+}
+
+func stringSliceField(t *testing.T, body []byte, field string) []string {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := payload[field].([]any)
+	values := make([]string, 0, len(raw))
+	for _, item := range raw {
+		value, _ := item.(string)
+		values = append(values, value)
+	}
+	return values
+}
+
+func objectSliceField(t *testing.T, body []byte, field string) []map[string]any {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := payload[field].([]any)
+	values := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		value, _ := item.(map[string]any)
+		values = append(values, value)
+	}
+	return values
 }
 
 func waitForTask(t *testing.T, baseURL, token, taskID string, want model.DownloadTaskStatus) *model.DownloadTask {
