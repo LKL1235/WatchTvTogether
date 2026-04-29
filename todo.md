@@ -10,7 +10,7 @@
 
 ## 0. 当前状态与约束梳理
 
-- [x] 当前后端实时同步边界：
+- 当前后端实时同步边界：
   - 后端不再提供任何长期 WebSocket 路由，包括旧的 `GET /ws/room/:roomId`。
   - 房间实时同步统一交给 Ably Realtime；后端只负责短生命周期 HTTP API。
   - 后端通过 `ABLY_ROOT_KEY` 使用 Ably REST 发布房间消息，root key 只能配置在服务端环境变量中。
@@ -19,12 +19,12 @@
     - `POST /api/rooms/:roomId/control`：房主/管理员提交播放控制，后端校验、写入状态并发布 `room.sync`。
     - `POST /api/rooms/:roomId/snapshot`：客户端进入房间时读取权威初始化快照。
     - `GET /api/rooms/:roomId/state`：保留为轻量播放状态读取接口。
-- [x] 当前后端存储与状态约束：
+- 当前后端存储与状态约束：
   - 后端只保留 Postgres 存储实现，不再保留 SQLite 本地兼容路径。
   - 播放状态最终一致性以后端 `RoomStateCache` / 存储为准。
   - Ably 负责实时分发，不作为权威持久状态来源。
   - 在线成员列表不再由后端内存 Hub 维护，客户端应使用 Ably presence。
-- [x] 客户端接入注意事项：
+- 客户端接入注意事项：
   - 浏览器绝不能持有或暴露 `ABLY_ROOT_KEY`，也不要配置任何 `VITE_ABLY_ROOT_KEY`。
   - 客户端必须使用后端 JWT 调用 `POST /api/ably/token` 获取短期 Ably token。
   - 后端签发的客户端 token 只授予当前房间 channel 的 `subscribe`、`presence`、`history`，不授予 `publish`。
