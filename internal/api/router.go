@@ -2,8 +2,6 @@ package api
 
 import (
 	"net/http"
-	"path/filepath"
-	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -21,8 +19,6 @@ import (
 
 type Dependencies struct {
 	Config config.Config
-	// StaticRoot, when set, serves the built SPA (e.g. Vite dist) and HTML5 fallback for non-API routes.
-	StaticRoot        string
 	UserStore         store.UserStore
 	RoomStore         store.RoomStore
 	VideoStore        store.VideoStore
@@ -40,32 +36,9 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	router.Use(cors.New(corsutil.GinConfig(deps.Config.CorsOrigins)))
 	roomhub.InitWebSocketCheckOrigin(deps.Config.CorsOrigins)
 
-	if root := strings.TrimSpace(deps.StaticRoot); root != "" {
-		assetsDir := filepath.Join(root, "assets")
-		router.Static("/assets", assetsDir)
-		router.GET("/", func(c *gin.Context) {
-			c.File(filepath.Join(root, "index.html"))
-		})
-		router.NoRoute(func(c *gin.Context) {
-			path := c.Request.URL.Path
-			if strings.HasPrefix(path, "/api/") ||
-				strings.HasPrefix(path, "/ws/") ||
-				strings.HasPrefix(path, "/static/") ||
-				path == "/healthz" {
-				apierr.Abort(c, apierr.NotFound("route not found"))
-				return
-			}
-			if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead {
-				c.File(filepath.Join(root, "index.html"))
-				return
-			}
-			apierr.Abort(c, apierr.NotFound("route not found"))
-		})
-	} else {
-		router.NoRoute(func(c *gin.Context) {
-			apierr.Abort(c, apierr.NotFound("route not found"))
-		})
-	}
+	router.NoRoute(func(c *gin.Context) {
+		apierr.Abort(c, apierr.NotFound("route not found"))
+	})
 
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{

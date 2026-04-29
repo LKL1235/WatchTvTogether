@@ -7,7 +7,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
-// NewClient returns a Redis client. When redisURL is non-empty (e.g. REDIS_URL from Vercel / Upstash),
+// NewClient returns a Redis client. When redisURL is non-empty (e.g. REDIS_URL),
 // it is parsed with TLS support for rediss://; otherwise addr is used as host:port.
 func NewClient(addr, redisURL string) (goredis.UniversalClient, error) {
 	u := strings.TrimSpace(redisURL)

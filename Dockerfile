@@ -1,10 +1,3 @@
-FROM node:20-alpine AS frontend-builder
-WORKDIR /src/frontend
-COPY frontend/package*.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
-
 FROM golang:1.25-alpine AS backend-builder
 WORKDIR /src
 RUN apk add --no-cache git
@@ -25,7 +18,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=backend-builder /out/watchtogether /app/watchtogether
-COPY --from=frontend-builder /src/frontend/dist /app/frontend/dist
 COPY config.yaml /app/config.yaml
 ENV ADDR=:8080 \
     STORAGE_DIR=/data/videos \

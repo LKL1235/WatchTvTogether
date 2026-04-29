@@ -73,7 +73,6 @@ func run() error {
 
 	router := api.NewRouter(api.Dependencies{
 		Config:            cfg,
-		StaticRoot:        cfg.StaticRoot,
 		UserStore:         st.users,
 		RoomStore:         st.rooms,
 		VideoStore:        st.videos,
