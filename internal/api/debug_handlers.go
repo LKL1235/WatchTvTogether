@@ -13,8 +13,8 @@ import (
 )
 
 type debugHandler struct {
-	deps Dependencies
-	hubs *roomhub.Manager
+	deps        Dependencies
+	roomService *roomhub.Service
 }
 
 type debugRoomsResponse struct {
@@ -30,8 +30,8 @@ type debugRoomResponse struct {
 	ViewerCount int              `json:"viewer_count"`
 }
 
-func registerDebugRoutes(router *gin.Engine, deps Dependencies, authService *authsvc.Service, hubs *roomhub.Manager) {
-	h := &debugHandler{deps: deps, hubs: hubs}
+func registerDebugRoutes(router *gin.Engine, deps Dependencies, authService *authsvc.Service, rooms *roomhub.Service) {
+	h := &debugHandler{deps: deps, roomService: rooms}
 	admin := router.Group("/api/admin", requireAuth(authService), requireAdmin)
 	admin.GET("/debug/rooms", h.rooms)
 }
@@ -46,7 +46,7 @@ func (h *debugHandler) rooms(c *gin.Context) {
 
 	items := make([]*debugRoomResponse, 0, len(rooms))
 	for _, room := range rooms {
-		snapshot := h.hubs.Snapshot(ctx, room.ID)
+		snapshot := h.roomService.Snapshot(ctx, room.ID)
 		state := snapshot.State
 		if state == nil {
 			var err error
@@ -76,9 +76,9 @@ func (h *debugHandler) rooms(c *gin.Context) {
 		items = append(items, &debugRoomResponse{
 			Room:        room,
 			State:       state,
-			Users:       snapshot.Users,
+			Users:       []roomhub.User{},
 			Queue:       queue,
-			ViewerCount: snapshot.ViewerCount,
+			ViewerCount: 0,
 		})
 	}
 

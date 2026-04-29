@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,21 +13,22 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 
-	"watchtogether/internal/cache/memory"
+	ablysdk "github.com/ably/ably-go/ably"
+
 	"watchtogether/internal/capabilities"
-	"watchtogether/internal/config"
 	"watchtogether/internal/download"
 	"watchtogether/internal/model"
-	"watchtogether/internal/store/sqlite"
+	"watchtogether/internal/room"
 	"watchtogether/pkg/ffmpeg"
 )
 
-func TestAuthRoomAndWebSocketFlow(t *testing.T) {
+func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := openTestDB(t)
 	deps := testDeps(db)
+	realtime := newFakeRealtime("watchtogether")
+	deps.Realtime = realtime
 	router := NewRouter(deps)
 	server := httptest.NewServer(router)
 	defer server.Close()
@@ -57,28 +57,30 @@ func TestAuthRoomAndWebSocketFlow(t *testing.T) {
 	})
 	memberAccess := tokenFrom(t, member.Body.Bytes(), "access_token")
 
-	ownerWS := dialRoom(t, server.URL, roomID, ownerAccess)
-	defer ownerWS.Close()
-	memberWS := dialRoom(t, server.URL, roomID, memberAccess)
-	defer memberWS.Close()
-	_ = readUntil(t, ownerWS, "room_event")
-	_ = readUntil(t, memberWS, "room_event")
-
-	writeWS(t, ownerWS, map[string]any{
-		"type":     "play_control",
+	memberControl := postJSON(t, server.URL+"/api/rooms/"+roomID+"/control", memberAccess, map[string]any{
 		"action":   "seek",
 		"position": 42.5,
 		"video_id": "video-1",
 		"queue":    []string{"video-1", "video-2"},
 	})
-
-	msg := readUntil(t, memberWS, "sync")
-	if msg["action"] != "seek" || msg["video_id"] != "video-1" {
-		t.Fatalf("unexpected sync message: %#v", msg)
+	if memberControl.Code != http.StatusForbidden {
+		t.Fatalf("member control status = %d body = %s", memberControl.Code, memberControl.Body.String())
 	}
-	queue, _ := msg["queue"].([]any)
-	if len(queue) != 2 || queue[1] != "video-2" {
-		t.Fatalf("unexpected sync queue: %#v", msg)
+
+	ownerControl := postJSON(t, server.URL+"/api/rooms/"+roomID+"/control", ownerAccess, map[string]any{
+		"action":   "seek",
+		"position": 42.5,
+		"video_id": "video-1",
+		"queue":    []string{"video-1", "video-2"},
+	})
+	if ownerControl.Code != http.StatusOK {
+		t.Fatalf("owner control status = %d body = %s", ownerControl.Code, ownerControl.Body.String())
+	}
+	if got := stringField(t, ownerControl.Body.Bytes(), "type"); got != "sync" {
+		t.Fatalf("control type = %q body = %s", got, ownerControl.Body.String())
+	}
+	if len(realtime.published) != 1 || realtime.published[0].Name != "room.sync" {
+		t.Fatalf("published messages = %#v", realtime.published)
 	}
 
 	state := getJSON(t, server.URL+"/api/rooms/"+roomID+"/state", ownerAccess)
@@ -92,20 +94,28 @@ func TestAuthRoomAndWebSocketFlow(t *testing.T) {
 		t.Fatalf("state queue = %#v body = %s", got, state.Body.String())
 	}
 
-	late := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
-		"username": "late",
-		"password": "password123",
-	})
-	lateAccess := tokenFrom(t, late.Body.Bytes(), "access_token")
-	lateWS := dialRoom(t, server.URL, roomID, lateAccess)
-	defer lateWS.Close()
-	snapshot := readUntil(t, lateWS, "room_snapshot")
-	payload, _ := snapshot["payload"].(map[string]any)
-	if numeric, _ := payload["viewer_count"].(float64); numeric != 3 {
-		t.Fatalf("snapshot viewer_count = %#v", snapshot)
+	snapshot := postJSON(t, server.URL+"/api/rooms/"+roomID+"/snapshot", memberAccess, map[string]string{})
+	if snapshot.Code != http.StatusOK {
+		t.Fatalf("snapshot status = %d body = %s", snapshot.Code, snapshot.Body.String())
 	}
-	if got, _ := payload["queue"].([]any); len(got) != 2 || got[0] != "video-1" {
-		t.Fatalf("snapshot queue = %#v", snapshot)
+	if got := stringSliceField(t, snapshot.Body.Bytes(), "queue"); len(got) != 2 || got[0] != "video-1" {
+		t.Fatalf("snapshot queue = %#v body = %s", got, snapshot.Body.String())
+	}
+	if numericField(t, snapshot.Body.Bytes(), "viewer_count") != 0 {
+		t.Fatalf("snapshot should not expose backend viewer_count from websocket hub: %s", snapshot.Body.String())
+	}
+	tokenResp := postJSON(t, server.URL+"/api/ably/token", memberAccess, map[string]string{
+		"room_id": roomID,
+		"purpose": "room",
+	})
+	if tokenResp.Code != http.StatusOK {
+		t.Fatalf("ably token status = %d body = %s", tokenResp.Code, tokenResp.Body.String())
+	}
+	if got := stringField(t, tokenResp.Body.Bytes(), "capability"); !strings.Contains(got, `"watchtogether:room:`) || strings.Contains(got, "publish") {
+		t.Fatalf("unexpected token capability: %s", got)
+	}
+	if route := getJSON(t, server.URL+"/ws/room/"+roomID, ownerAccess); route.Code != http.StatusNotFound {
+		t.Fatalf("room websocket route status = %d body = %s", route.Code, route.Body.String())
 	}
 
 	owner, err := deps.UserStore.GetByID(context.Background(), userIDFrom(t, register.Body.Bytes()))
@@ -129,11 +139,65 @@ func TestAuthRoomAndWebSocketFlow(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("debug rooms items = %#v", items)
 	}
-	if got, _ := items[0]["viewer_count"].(float64); got != 3 {
+	if got, _ := items[0]["viewer_count"].(float64); got != 0 {
 		t.Fatalf("debug room viewer_count = %#v", items[0])
 	}
 	if got, _ := items[0]["queue"].([]any); len(got) != 2 || got[1] != "video-2" {
 		t.Fatalf("debug room queue = %#v", items[0])
+	}
+}
+
+func TestPrivateRoomRequiresPasswordForJoinSnapshotAndToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := openTestDB(t)
+	deps := testDeps(db)
+	realtime := newFakeRealtime("watchtogether")
+	deps.Realtime = realtime
+	router := NewRouter(deps)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	ownerRegister := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
+		"username": "owner",
+		"password": "password123",
+	})
+	ownerAccess := tokenFrom(t, ownerRegister.Body.Bytes(), "access_token")
+	create := postJSON(t, server.URL+"/api/rooms", ownerAccess, map[string]string{
+		"name":       "Secret Movie",
+		"visibility": "private",
+		"password":   "room-pass",
+	})
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create private room status = %d body = %s", create.Code, create.Body.String())
+	}
+	roomID := stringField(t, create.Body.Bytes(), "id")
+
+	memberRegister := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
+		"username": "member",
+		"password": "password123",
+	})
+	memberAccess := tokenFrom(t, memberRegister.Body.Bytes(), "access_token")
+
+	for name, resp := range map[string]*httptest.ResponseRecorder{
+		"join":     postJSON(t, server.URL+"/api/rooms/"+roomID+"/join", memberAccess, map[string]string{"password": "bad"}),
+		"snapshot": postJSON(t, server.URL+"/api/rooms/"+roomID+"/snapshot", memberAccess, map[string]string{"password": "bad"}),
+		"token":    postJSON(t, server.URL+"/api/ably/token", memberAccess, map[string]string{"room_id": roomID, "purpose": "room", "password": "bad"}),
+	} {
+		if resp.Code != http.StatusForbidden {
+			t.Fatalf("%s status = %d body = %s", name, resp.Code, resp.Body.String())
+		}
+	}
+	for name, resp := range map[string]*httptest.ResponseRecorder{
+		"join":     postJSON(t, server.URL+"/api/rooms/"+roomID+"/join", memberAccess, map[string]string{"password": "room-pass"}),
+		"snapshot": postJSON(t, server.URL+"/api/rooms/"+roomID+"/snapshot", memberAccess, map[string]string{"password": "room-pass"}),
+		"token":    postJSON(t, server.URL+"/api/ably/token", memberAccess, map[string]string{"room_id": roomID, "purpose": "room", "password": "room-pass"}),
+	} {
+		if resp.Code != http.StatusOK {
+			t.Fatalf("%s status = %d body = %s", name, resp.Code, resp.Body.String())
+		}
+	}
+	if ownerSnapshot := postJSON(t, server.URL+"/api/rooms/"+roomID+"/snapshot", ownerAccess, map[string]string{}); ownerSnapshot.Code != http.StatusOK {
+		t.Fatalf("owner snapshot status = %d body = %s", ownerSnapshot.Code, ownerSnapshot.Body.String())
 	}
 }
 
@@ -194,9 +258,6 @@ func TestCapabilitiesDownloadsAndVideosFlow(t *testing.T) {
 		t.Fatalf("capabilities status = %d body = %s", caps.Code, caps.Body.String())
 	}
 
-	updates := dialAdminDownloads(t, server.URL, token)
-	defer updates.Close()
-
 	created := postJSON(t, server.URL+"/api/admin/downloads", token, map[string]string{
 		"source_url": source.URL + "/movie.mp4",
 	})
@@ -204,11 +265,6 @@ func TestCapabilitiesDownloadsAndVideosFlow(t *testing.T) {
 		t.Fatalf("create download status = %d body = %s", created.Code, created.Body.String())
 	}
 	taskID := stringField(t, created.Body.Bytes(), "id")
-	update := readUntil(t, updates, "download_task")
-	updateTask, _ := update["task"].(map[string]any)
-	if updateTask["id"] != taskID {
-		t.Fatalf("unexpected download update: %#v", update)
-	}
 	task := waitForTask(t, server.URL, token, taskID, model.DownloadTaskCompleted)
 	if task.VideoID == "" || task.Progress != 100 {
 		t.Fatalf("unexpected completed task: %#v", task)
@@ -236,34 +292,9 @@ func TestCapabilitiesDownloadsAndVideosFlow(t *testing.T) {
 	if _, err := os.Stat(videoPath); !os.IsNotExist(err) {
 		t.Fatalf("video file should be deleted, stat err = %v", err)
 	}
-}
 
-func openTestDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := sqlite.Open(context.Background(), ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
-}
-
-func testDeps(db *sql.DB) Dependencies {
-	cfg := config.Default()
-	cfg.JWTSecret = "test-secret"
-	cfg.JWTAccessTTL = time.Hour
-	cfg.JWTRefreshTTL = 24 * time.Hour
-	cfg.StorageDir = "."
-	cfg.PosterDir = "."
-	return Dependencies{
-		Config:            cfg,
-		UserStore:         sqlite.NewUserStore(db),
-		RoomStore:         sqlite.NewRoomStore(db),
-		VideoStore:        sqlite.NewVideoStore(db),
-		DownloadTaskStore: sqlite.NewDownloadTaskStore(db),
-		SessionCache:      memory.NewSessionCache(),
-		RoomStateCache:    memory.NewRoomStateCache(),
-		PubSub:            memory.NewPubSub(),
+	if route := getJSON(t, server.URL+"/ws/admin/downloads", token); route.Code != http.StatusNotFound {
+		t.Fatalf("admin downloads websocket route status = %d body = %s", route.Code, route.Body.String())
 	}
 }
 
@@ -472,43 +503,45 @@ func waitForTask(t *testing.T, baseURL, token, taskID string, want model.Downloa
 	return nil
 }
 
-func dialRoom(t *testing.T, baseURL, roomID, token string) *websocket.Conn {
-	t.Helper()
-	wsURL := "ws" + strings.TrimPrefix(baseURL, "http") + "/ws/room/" + roomID + "?token=" + token
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+type fakeRealtime struct {
+	prefix    string
+	published []publishedMessage
+}
+
+type publishedMessage struct {
+	RoomID string
+	Name   string
+	Data   room.Message
+}
+
+func newFakeRealtime(prefix string) *fakeRealtime {
+	return &fakeRealtime{prefix: prefix}
+}
+
+func (f *fakeRealtime) ChannelName(roomID string) string {
+	return f.prefix + ":room:" + roomID + ":control"
+}
+
+func (f *fakeRealtime) RoomCapability(roomID string) (string, error) {
+	return `{"` + f.ChannelName(roomID) + `":["subscribe","presence","history"]}`, nil
+}
+
+func (f *fakeRealtime) RequestRoomToken(ctx context.Context, roomID, clientID string) (*ablysdk.TokenDetails, error) {
+	capability, err := f.RoomCapability(roomID)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
-	return conn
+	return &ablysdk.TokenDetails{
+		Token:      "fake-token",
+		Expires:    time.Now().Add(30 * time.Minute).UnixMilli(),
+		Issued:     time.Now().UnixMilli(),
+		Capability: capability,
+		ClientID:   clientID,
+	}, nil
 }
 
-func dialAdminDownloads(t *testing.T, baseURL, token string) *websocket.Conn {
-	t.Helper()
-	wsURL := "ws" + strings.TrimPrefix(baseURL, "http") + "/ws/admin/downloads?token=" + token
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return conn
-}
-
-func writeWS(t *testing.T, conn *websocket.Conn, payload any) {
-	t.Helper()
-	if err := conn.WriteJSON(payload); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func readUntil(t *testing.T, conn *websocket.Conn, msgType string) map[string]any {
-	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	for {
-		var msg map[string]any
-		if err := conn.ReadJSON(&msg); err != nil {
-			t.Fatalf("read websocket message: %v", err)
-		}
-		if msg["type"] == msgType {
-			return msg
-		}
-	}
+func (f *fakeRealtime) PublishRoomMessage(ctx context.Context, roomID, name string, data any) error {
+	msg, _ := data.(room.Message)
+	f.published = append(f.published, publishedMessage{RoomID: roomID, Name: name, Data: msg})
+	return nil
 }

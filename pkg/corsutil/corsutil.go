@@ -1,4 +1,4 @@
-// Package corsutil 提供与浏览器跨域（CORS / WebSocket Origin）一致的来源校验，供 HTTP 与 WS 复用。
+// Package corsutil 提供浏览器跨域（CORS）配置。
 package corsutil
 
 import (
@@ -15,7 +15,6 @@ func GinConfig(allowed []string) cors.Config {
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "Range", "X-Requested-With"},
 		ExposeHeaders:    []string{"Content-Length", "Content-Range", "Accept-Ranges"},
 		AllowCredentials: false,
-		AllowWebSockets:  true,
 	}
 	if allowAll(allowed) {
 		cfg.AllowAllOrigins = true
@@ -25,7 +24,7 @@ func GinConfig(allowed []string) cors.Config {
 	return cfg
 }
 
-// CheckOrigin 返回适用于 gorilla/websocket.Upgrader 的 CheckOrigin 函数，规则与 GinConfig 一致。
+// CheckOrigin 返回与 GinConfig 一致的 Origin 校验函数。
 func CheckOrigin(allowed []string) func(r *http.Request) bool {
 	if allowAll(allowed) {
 		return func(r *http.Request) bool { return true }

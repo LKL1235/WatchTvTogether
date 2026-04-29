@@ -16,9 +16,9 @@ import (
 )
 
 type roomHandler struct {
-	deps Dependencies
-	auth *authsvc.Service
-	hubs *roomhub.Manager
+	deps  Dependencies
+	auth  *authsvc.Service
+	rooms *roomhub.Service
 }
 
 type roomResponse struct {
@@ -36,14 +36,45 @@ type joinRoomRequest struct {
 	Password string `json:"password"`
 }
 
+type ablyTokenRequest struct {
+	RoomID   string `json:"room_id"`
+	Purpose  string `json:"purpose"`
+	Password string `json:"password"`
+}
+
+type controlRoomRequest struct {
+	Action   model.PlaybackAction `json:"action"`
+	Position float64              `json:"position"`
+	VideoID  string               `json:"video_id"`
+	Queue    []string             `json:"queue"`
+}
+
+type roomSnapshotRequest struct {
+	Password string `json:"password"`
+}
+
+type roomSnapshotResponse struct {
+	RoomID      string           `json:"room_id"`
+	State       *model.RoomState `json:"state"`
+	Queue       []string         `json:"queue"`
+	ViewerCount int              `json:"viewer_count"`
+	Ably        ablyRoomInfo     `json:"ably"`
+}
+
+type ablyRoomInfo struct {
+	Channel       string `json:"channel"`
+	TokenEndpoint string `json:"token_endpoint"`
+}
+
 type roomListResponse struct {
 	Items []*model.Room `json:"items"`
 	Total int           `json:"total"`
 }
 
-func registerRoomRoutes(router *gin.Engine, deps Dependencies, authService *authsvc.Service, hubs *roomhub.Manager) {
-	h := &roomHandler{deps: deps, auth: authService, hubs: hubs}
+func registerRoomRoutes(router *gin.Engine, deps Dependencies, authService *authsvc.Service, rooms *roomhub.Service) {
+	h := &roomHandler{deps: deps, auth: authService, rooms: rooms}
 	api := router.Group("/api", requireAuth(authService))
+	api.POST("/ably/token", h.ablyToken)
 	api.POST("/rooms", h.create)
 	api.GET("/rooms", h.list)
 	api.GET("/rooms/:roomId", h.get)
@@ -51,7 +82,8 @@ func registerRoomRoutes(router *gin.Engine, deps Dependencies, authService *auth
 	api.POST("/rooms/:roomId/join", h.join)
 	api.POST("/rooms/:roomId/kick/:uid", h.kick)
 	api.GET("/rooms/:roomId/state", h.state)
-	router.GET("/ws/room/:roomId", h.ws)
+	api.POST("/rooms/:roomId/control", h.control)
+	api.POST("/rooms/:roomId/snapshot", h.snapshot)
 }
 
 func (h *roomHandler) create(c *gin.Context) {
@@ -129,7 +161,11 @@ func (h *roomHandler) delete(c *gin.Context) {
 		respondStoreError(c, err)
 		return
 	}
-	_ = h.hubs.Destroy(c.Request.Context(), room.ID)
+	user := roomUserFromClaims(currentUser(c), room)
+	if err := h.rooms.Destroy(c.Request.Context(), room.ID, &user); err != nil {
+		respondStoreError(c, err)
+		return
+	}
 	c.Status(http.StatusNoContent)
 }
 
@@ -138,13 +174,13 @@ func (h *roomHandler) join(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if room.Visibility == model.RoomVisibilityPrivate {
+	if !h.canAccessRoom(c, room, "") {
 		var req joinRoomRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			apierr.Abort(c, apierr.InvalidRequest("invalid JSON body"))
 			return
 		}
-		if !authsvc.CheckPassword(room.PasswordHash, req.Password) {
+		if !h.canAccessRoom(c, room, req.Password) {
 			apierr.Abort(c, apierr.Forbidden("invalid room password"))
 			return
 		}
@@ -164,6 +200,11 @@ func (h *roomHandler) kick(c *gin.Context) {
 	}
 	if strings.TrimSpace(c.Param("uid")) == "" {
 		apierr.Abort(c, apierr.InvalidRequest("user id is required"))
+		return
+	}
+	target := &roomhub.User{ID: strings.TrimSpace(c.Param("uid"))}
+	if err := h.rooms.PublishRoomEvent(c.Request.Context(), room.ID, "user_kicked", target); err != nil {
+		respondStoreError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -186,22 +227,122 @@ func (h *roomHandler) state(c *gin.Context) {
 	c.JSON(http.StatusOK, state)
 }
 
-func (h *roomHandler) ws(c *gin.Context) {
+func (h *roomHandler) ablyToken(c *gin.Context) {
+	if h.deps.Realtime == nil {
+		apierr.Abort(c, apierr.Internal("ably realtime is not configured"))
+		return
+	}
+	var req ablyTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apierr.Abort(c, apierr.InvalidRequest("invalid JSON body"))
+		return
+	}
+	if req.Purpose != "" && req.Purpose != "room" {
+		apierr.Abort(c, apierr.InvalidRequest("unsupported token purpose"))
+		return
+	}
+	roomID := strings.TrimSpace(req.RoomID)
+	if roomID == "" {
+		apierr.Abort(c, apierr.InvalidRequest("room_id is required"))
+		return
+	}
+	room, err := h.deps.RoomStore.GetByID(c.Request.Context(), roomID)
+	if err != nil {
+		respondStoreError(c, err)
+		return
+	}
+	if !h.canAccessRoom(c, room, req.Password) {
+		apierr.Abort(c, apierr.Forbidden("invalid room password"))
+		return
+	}
+	token, err := h.deps.Realtime.RequestRoomToken(c.Request.Context(), room.ID, currentClaims(c).UserID)
+	if err != nil {
+		apierr.Abort(c, apierr.Internal("failed to issue ably token"))
+		return
+	}
+	c.JSON(http.StatusOK, token)
+}
+
+func (h *roomHandler) control(c *gin.Context) {
 	room, ok := h.loadRoom(c)
 	if !ok {
 		return
 	}
-	claims, err := h.auth.ParseToken(c.Request.Context(), bearerFromQueryOrHeader(c), authsvc.TokenTypeAccess)
-	if err != nil {
-		apierr.Abort(c, apierr.Unauthorized("valid access token required"))
+	if !canManageRoom(c, room) {
+		apierr.Abort(c, apierr.Forbidden("room owner or admin required"))
 		return
 	}
-	hub := h.hubs.Get(room.ID)
-	_ = hub.Serve(c, roomhub.User{
-		ID:       claims.UserID,
-		Username: claims.Username,
-		Role:     claims.Role,
-		IsOwner:  room.OwnerID == claims.UserID,
+	var req controlRoomRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apierr.Abort(c, apierr.InvalidRequest("invalid JSON body"))
+		return
+	}
+	if !validPlaybackAction(req.Action) {
+		apierr.Abort(c, apierr.InvalidRequest("invalid playback action"))
+		return
+	}
+	user := roomUserFromClaims(currentUser(c), room)
+	msg, err := h.rooms.ApplyControl(c.Request.Context(), room.ID, user, roomhub.Message{
+		Action:   req.Action,
+		Position: req.Position,
+		VideoID:  strings.TrimSpace(req.VideoID),
+		Queue:    cleanQueue(req.Queue),
+	})
+	if err != nil {
+		if errors.Is(err, roomhub.ErrForbidden) {
+			apierr.Abort(c, apierr.Forbidden("room owner or admin required"))
+			return
+		}
+		respondStoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, msg)
+}
+
+func (h *roomHandler) snapshot(c *gin.Context) {
+	room, ok := h.loadRoom(c)
+	if !ok {
+		return
+	}
+	var req roomSnapshotRequest
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			apierr.Abort(c, apierr.InvalidRequest("invalid JSON body"))
+			return
+		}
+	}
+	if !h.canAccessRoom(c, room, req.Password) {
+		apierr.Abort(c, apierr.Forbidden("invalid room password"))
+		return
+	}
+	snapshot := h.rooms.Snapshot(c.Request.Context(), room.ID)
+	state := snapshot.State
+	queue := append([]string(nil), snapshot.Queue...)
+	if state == nil {
+		state = &model.RoomState{
+			RoomID:   room.ID,
+			VideoID:  room.CurrentVideo,
+			Queue:    queue,
+			Action:   model.PlaybackActionPause,
+			Position: 0,
+		}
+	}
+	if len(queue) == 0 && state.VideoID != "" {
+		queue = []string{state.VideoID}
+	}
+	channel := ""
+	if h.deps.Realtime != nil {
+		channel = h.deps.Realtime.ChannelName(room.ID)
+	}
+	c.JSON(http.StatusOK, roomSnapshotResponse{
+		RoomID:      room.ID,
+		State:       state,
+		Queue:       queue,
+		ViewerCount: snapshot.ViewerCount,
+		Ably: ablyRoomInfo{
+			Channel:       channel,
+			TokenEndpoint: "/api/ably/token",
+		},
 	})
 }
 
@@ -221,6 +362,44 @@ func canManageRoom(c *gin.Context, room *model.Room) bool {
 		return false
 	}
 	return user.Role == model.UserRoleAdmin || room.OwnerID == user.UserID
+}
+
+func (h *roomHandler) canAccessRoom(c *gin.Context, room *model.Room, password string) bool {
+	if room.Visibility != model.RoomVisibilityPrivate || canManageRoom(c, room) {
+		return true
+	}
+	return authsvc.CheckPassword(room.PasswordHash, password)
+}
+
+func roomUserFromClaims(claims *authsvc.Claims, room *model.Room) roomhub.User {
+	if claims == nil {
+		return roomhub.User{}
+	}
+	return roomhub.User{
+		ID:       claims.UserID,
+		Username: claims.Username,
+		Role:     claims.Role,
+		IsOwner:  room.OwnerID == claims.UserID,
+	}
+}
+
+func validPlaybackAction(action model.PlaybackAction) bool {
+	switch action {
+	case model.PlaybackActionPlay, model.PlaybackActionPause, model.PlaybackActionSeek, model.PlaybackActionNext, model.PlaybackActionSwitch:
+		return true
+	default:
+		return false
+	}
+}
+
+func cleanQueue(queue []string) []string {
+	out := make([]string, 0, len(queue))
+	for _, item := range queue {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func parseInt(raw string, fallback int) int {

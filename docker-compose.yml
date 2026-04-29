@@ -40,6 +40,9 @@ services:
       CACHE_BACKEND: redis
       REDIS_ADDR: redis:6379
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      ABLY_ROOT_KEY: ${ABLY_ROOT_KEY}
+      ABLY_TOKEN_TTL: ${ABLY_TOKEN_TTL:-30m}
+      ABLY_CHANNEL_PREFIX: ${ABLY_CHANNEL_PREFIX:-watchtogether}
       STORAGE_DIR: /data/videos
       POSTER_DIR: /data/posters
       DOWNLOAD_WORKERS: ${DOWNLOAD_WORKERS:-2}
