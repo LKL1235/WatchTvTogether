@@ -8,9 +8,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -ldflags
 
 FROM ubuntu:24.04 AS runtime
 RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl ffmpeg \
-    && curl -L "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" -o /usr/local/bin/yt-dlp \
-    && chmod +x /usr/local/bin/yt-dlp \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl \
     && groupadd -r watchtogether \
     && useradd -r -g watchtogether -d /app -s /usr/sbin/nologin watchtogether \
     && mkdir -p /app /data/videos /data/posters \

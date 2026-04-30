@@ -19,7 +19,6 @@ import (
 	rediscache "watchtogether/internal/cache/redis"
 	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
-	"watchtogether/internal/download"
 	"watchtogether/internal/email"
 	"watchtogether/internal/emailcode"
 	ablyrealtime "watchtogether/internal/realtime/ably"
@@ -28,11 +27,10 @@ import (
 )
 
 type stores struct {
-	db            *sql.DB
-	users         store.UserStore
-	rooms         store.RoomStore
-	videos        store.VideoStore
-	downloadTasks store.DownloadTaskStore
+	db     *sql.DB
+	users  store.UserStore
+	rooms  store.RoomStore
+	videos store.VideoStore
 }
 
 type caches struct {
@@ -73,10 +71,6 @@ func run() error {
 
 	caps := capabilities.Check(context.Background())
 	capabilities.Log(caps)
-	rootCtx, stopDownloads := context.WithCancel(context.Background())
-	defer stopDownloads()
-	downloads := download.NewServiceWithOptions(st.downloadTasks, st.videos, cfg, caps, download.WithPubSub(ca.pubsub))
-	downloads.Start(rootCtx, cfg.DownloadWorkers)
 
 	realtime, err := ablyrealtime.NewService(cfg)
 	if err != nil {
@@ -92,21 +86,19 @@ func run() error {
 	}
 
 	router := api.NewRouter(api.Dependencies{
-		Config:            cfg,
-		UserStore:         st.users,
-		RoomStore:         st.rooms,
-		VideoStore:        st.videos,
-		DownloadTaskStore: st.downloadTasks,
-		EmailSender:       emailSender,
-		EmailCodes:        emailCodes,
-		SessionCache:      ca.sessions,
-		RoomStateCache:    ca.roomStates,
-		RoomPresence:      ca.roomPresence,
-		RoomAccess:        ca.roomAccess,
-		PubSub:            ca.pubsub,
-		Realtime:          realtime,
-		Capabilities:      caps,
-		DownloadService:   downloads,
+		Config:         cfg,
+		UserStore:      st.users,
+		RoomStore:      st.rooms,
+		VideoStore:     st.videos,
+		EmailSender:    emailSender,
+		EmailCodes:     emailCodes,
+		SessionCache:   ca.sessions,
+		RoomStateCache: ca.roomStates,
+		RoomPresence:   ca.roomPresence,
+		RoomAccess:     ca.roomAccess,
+		PubSub:         ca.pubsub,
+		Realtime:       realtime,
+		Capabilities:   caps,
 	})
 
 	srv := &http.Server{
@@ -144,11 +136,10 @@ func newStores(cfg config.Config) (*stores, error) {
 			return nil, err
 		}
 		return &stores{
-			db:            db,
-			users:         postgres.NewUserStore(db),
-			rooms:         postgres.NewRoomStore(db),
-			videos:        postgres.NewVideoStore(db),
-			downloadTasks: postgres.NewDownloadTaskStore(db),
+			db:     db,
+			users:  postgres.NewUserStore(db),
+			rooms:  postgres.NewRoomStore(db),
+			videos: postgres.NewVideoStore(db),
 		}, nil
 	default:
 		return nil, errors.New("unsupported storage backend: " + cfg.StorageBackend)

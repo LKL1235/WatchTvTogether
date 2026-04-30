@@ -53,9 +53,6 @@ services:
       EMAIL_CODE_MAX_ATTEMPTS: ${EMAIL_CODE_MAX_ATTEMPTS:-5}
       STORAGE_DIR: /data/videos
       POSTER_DIR: /data/posters
-      DOWNLOAD_WORKERS: ${DOWNLOAD_WORKERS:-2}
-      ARIA2_RPC_URL: ${ARIA2_RPC_URL:-http://aria2:6800/jsonrpc}
-      ARIA2_SECRET: ${ARIA2_SECRET:-}
     ports:
       - "${APP_PORT:-8080}:8080"
     volumes:

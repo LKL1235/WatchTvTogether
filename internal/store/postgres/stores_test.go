@@ -23,17 +23,16 @@ func TestStores(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			_, _ = db.ExecContext(ctx, "TRUNCATE download_tasks, videos, rooms, users")
+			_, _ = db.ExecContext(ctx, "TRUNCATE videos, rooms, users")
 			if err := db.Close(); err != nil {
 				t.Errorf("close db: %v", err)
 			}
 		})
 
 		return testutil.Suite{
-			Users:         postgres.NewUserStore(db),
-			Rooms:         postgres.NewRoomStore(db),
-			Videos:        postgres.NewVideoStore(db),
-			DownloadTasks: postgres.NewDownloadTaskStore(db),
+			Users:  postgres.NewUserStore(db),
+			Rooms:  postgres.NewRoomStore(db),
+			Videos: postgres.NewVideoStore(db),
 		}
 	})
 }

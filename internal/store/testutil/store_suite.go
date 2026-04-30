@@ -13,10 +13,9 @@ import (
 )
 
 type Suite struct {
-	Users         store.UserStore
-	Rooms         store.RoomStore
-	Videos        store.VideoStore
-	DownloadTasks store.DownloadTaskStore
+	Users  store.UserStore
+	Rooms  store.RoomStore
+	Videos store.VideoStore
 }
 
 func RunStoreSuite(t *testing.T, newSuite func(t *testing.T) Suite) {
@@ -148,45 +147,6 @@ func RunStoreSuite(t *testing.T, newSuite func(t *testing.T) Suite) {
 		}
 		if err := suite.Videos.Delete(ctx, video.ID); err != nil {
 			t.Fatalf("delete video: %v", err)
-		}
-	})
-
-	t.Run("download tasks", func(t *testing.T) {
-		ctx := context.Background()
-		suite := newSuite(t)
-		now := time.Now().UTC()
-		task := &model.DownloadTask{
-			ID:        uuid.NewString(),
-			UserID:    "user-1",
-			SourceURL: "https://example.test/video.mp4",
-			Progress:  0,
-			Status:    model.DownloadTaskPending,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-
-		if err := suite.DownloadTasks.Create(ctx, task); err != nil {
-			t.Fatalf("create task: %v", err)
-		}
-		if err := suite.DownloadTasks.UpdateProgress(ctx, task.ID, 42.5, model.DownloadTaskRunning); err != nil {
-			t.Fatalf("update task progress: %v", err)
-		}
-		got, err := suite.DownloadTasks.GetByID(ctx, task.ID)
-		if err != nil {
-			t.Fatalf("get task: %v", err)
-		}
-		if got.Progress != 42.5 || got.Status != model.DownloadTaskRunning {
-			t.Fatalf("unexpected task state: progress=%f status=%s", got.Progress, got.Status)
-		}
-		tasks, err := suite.DownloadTasks.List(ctx)
-		if err != nil {
-			t.Fatalf("list tasks: %v", err)
-		}
-		if len(tasks) != 1 {
-			t.Fatalf("unexpected task count: %d", len(tasks))
-		}
-		if err := suite.DownloadTasks.Delete(ctx, task.ID); err != nil {
-			t.Fatalf("delete task: %v", err)
 		}
 	})
 }

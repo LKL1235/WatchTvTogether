@@ -244,79 +244,6 @@ func (s *VideoStore) Delete(ctx context.Context, id string) error {
 	return requireRows(res)
 }
 
-type DownloadTaskStore struct {
-	db *sql.DB
-}
-
-func NewDownloadTaskStore(db *sql.DB) *DownloadTaskStore {
-	return &DownloadTaskStore{db: db}
-}
-
-func (s *DownloadTaskStore) Create(ctx context.Context, task *model.DownloadTask) error {
-	now := utcNow()
-	if task.ID == "" {
-		task.ID = uuid.NewString()
-	}
-	if task.Status == "" {
-		task.Status = model.DownloadTaskPending
-	}
-	if task.CreatedAt.IsZero() {
-		task.CreatedAt = now
-	}
-	task.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `INSERT INTO download_tasks (id, user_id, source_url, video_id, progress, status, error, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		task.ID, task.UserID, task.SourceURL, task.VideoID, task.Progress, string(task.Status), task.Error, task.CreatedAt, task.UpdatedAt)
-	return wrapConstraint(err)
-}
-
-func (s *DownloadTaskStore) GetByID(ctx context.Context, id string) (*model.DownloadTask, error) {
-	return scanDownloadTask(s.db.QueryRowContext(ctx, `SELECT id, user_id, source_url, video_id, progress, status, error, created_at, updated_at FROM download_tasks WHERE id = $1`, id))
-}
-
-func (s *DownloadTaskStore) List(ctx context.Context) ([]*model.DownloadTask, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, user_id, source_url, video_id, progress, status, error, created_at, updated_at FROM download_tasks ORDER BY created_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	tasks := []*model.DownloadTask{}
-	for rows.Next() {
-		task, err := scanDownloadTask(rows)
-		if err != nil {
-			return nil, err
-		}
-		tasks = append(tasks, task)
-	}
-	return tasks, rows.Err()
-}
-
-func (s *DownloadTaskStore) UpdateProgress(ctx context.Context, id string, progress float64, status model.DownloadTaskStatus) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE download_tasks SET progress = $1, status = $2, updated_at = $3 WHERE id = $4`, progress, string(status), utcNow(), id)
-	if err != nil {
-		return err
-	}
-	return requireRows(res)
-}
-
-func (s *DownloadTaskStore) UpdateResult(ctx context.Context, task *model.DownloadTask) error {
-	task.UpdatedAt = utcNow()
-	res, err := s.db.ExecContext(ctx, `UPDATE download_tasks SET video_id = $1, progress = $2, status = $3, error = $4, updated_at = $5 WHERE id = $6`,
-		task.VideoID, task.Progress, string(task.Status), task.Error, task.UpdatedAt, task.ID)
-	if err != nil {
-		return err
-	}
-	return requireRows(res)
-}
-
-func (s *DownloadTaskStore) Delete(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM download_tasks WHERE id = $1`, id)
-	if err != nil {
-		return err
-	}
-	return requireRows(res)
-}
-
 func scanUser(scanner interface {
 	Scan(dest ...any) error
 }) (*model.User, error) {
@@ -351,18 +278,6 @@ func scanVideo(scanner interface {
 	}
 	video.Status = model.VideoStatus(status)
 	return &video, nil
-}
-
-func scanDownloadTask(scanner interface {
-	Scan(dest ...any) error
-}) (*model.DownloadTask, error) {
-	var task model.DownloadTask
-	var status string
-	if err := scanner.Scan(&task.ID, &task.UserID, &task.SourceURL, &task.VideoID, &task.Progress, &status, &task.Error, &task.CreatedAt, &task.UpdatedAt); err != nil {
-		return nil, wrapNotFound(err)
-	}
-	task.Status = model.DownloadTaskStatus(status)
-	return &task, nil
 }
 
 func normalizePage(limit, offset int) (int, int) {
