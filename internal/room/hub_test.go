@@ -36,12 +36,35 @@ func (m *memRooms) List(_ context.Context, opts store.ListRoomsOpts) ([]*model.R
 
 func (m *memRooms) Update(context.Context, *model.Room) error { return nil }
 
+func TestRunEmptyRoomCleanupRemovesDBOnlyEmptyRoom(t *testing.T) {
+	ctx := context.Background()
+	states := memory.NewRoomStateCache()
+	presence := memory.NewRoomPresence()
+	access := memory.NewRoomAccess()
+	rs := &memRooms{rooms: make(map[string]*model.Room)}
+	svc := NewService(states, presence, rs, nil, access, nil)
+
+	rid := uuid.NewString()
+	rs.rooms[rid] = &model.Room{ID: rid, Name: "ghost"}
+	_ = access.GrantRoomAccess(ctx, rid, "u1")
+
+	if err := svc.RunEmptyRoomCleanup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := rs.rooms[rid]; ok {
+		t.Fatal("ghost room should be removed from DB")
+	}
+	if ok, _ := access.HasRoomAccess(ctx, rid, "u1"); ok {
+		t.Fatal("room access should be cleared")
+	}
+}
+
 func TestRunEmptyRoomCleanupDeletesPending(t *testing.T) {
 	ctx := context.Background()
 	states := memory.NewRoomStateCache()
 	presence := memory.NewRoomPresence()
 	rs := &memRooms{rooms: make(map[string]*model.Room)}
-	svc := NewService(states, presence, rs, nil, nil)
+	svc := NewService(states, presence, rs, nil, nil, nil)
 
 	rid := uuid.NewString()
 	rs.rooms[rid] = &model.Room{ID: rid, Name: "x"}

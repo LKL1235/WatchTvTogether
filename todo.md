@@ -17,7 +17,7 @@
   - `GET /api/rooms/:roomId/state` 会返回投影后的播放进度与播放状态。
   - `DELETE /api/rooms/:roomId` 已允许房主或管理员删除/关闭房间，并发布 `room_closed` 事件。
   - 登录后通过 `authService.SetAfterLogin` 触发 `rooms.MaybeRunGlobalCleanup`。
-  - Redis presence 当前会阻止用户同时在两个房间，冲突时 `join` 返回 409。
+  - Redis presence 支持用户从旧房间自动迁移到新房间；不再对跨房 join 返回 409。
 - 已确认的产品决策：
   - 私有房密码记忆使用“方案 A：服务端访问授权”，授权有效期直到房间关闭/删除。
   - 管理员关闭房间等同删除房间，不需要关闭记录和审计日志。
@@ -39,14 +39,14 @@
 
 ### 服务端待办
 
-- [ ] 明确 `POST /api/rooms/:roomId/snapshot` 的状态契约：`state.action` 必须代表房间当前权威播放状态，尤其是正在播放时应为 `play`，不能因为投影进度或默认值被降级为 `pause`。
-- [ ] 检查 `ProjectedRoomState` 与 `ProjectedPlayback` 在 `play` 状态下的返回值，确保只投影 position，不改变非结束场景的 `Action`。
-- [ ] 检查视频结束场景：仅当确实到达视频末尾并按播放模式需要暂停/切换时，才将 `Action` 置为 `pause` 或切换后的状态。
-- [ ] 为 `snapshot` 添加/补充后端测试：
-  - [ ] 房间状态为 `play`，一段时间后新用户获取 snapshot，返回 `state.action=play` 且 position 为投影后的值。
-  - [ ] 房间状态为 `pause`，snapshot 返回 `pause` 且 position 不继续增长。
+- [x] 明确 `POST /api/rooms/:roomId/snapshot` 的状态契约：`state.action` 必须代表房间当前权威播放状态，尤其是正在播放时应为 `play`，不能因为投影进度或默认值被降级为 `pause`。（`ProjectedRoomState` 在非片尾场景保持 `Action`；snapshot 使用投影状态。）
+- [x] 检查 `ProjectedRoomState` 与 `ProjectedPlayback` 在 `play` 状态下的返回值，确保只投影 position，不改变非结束场景的 `Action`。
+- [x] 检查视频结束场景：仅当确实到达视频末尾并按播放模式需要暂停/切换时，才将 `Action` 置为 `pause` 或切换后的状态。（逻辑已在 `hub.projectState`；片尾边界单测可继续补充。）
+- [x] 为 `snapshot` 添加/补充后端测试：
+  - [x] 房间状态为 `play`，一段时间后新用户获取 snapshot，返回 `state.action=play` 且 position 为投影后的值。
+  - [x] 房间状态为 `pause`，snapshot 返回 `pause` 且 position 不继续增长。
   - [ ] 视频播放至末尾时按顺序/循环模式处理，不误报正在播放。
-- [ ] 如发现 `room.sync` 消息缺少客户端需要的字段，补齐 `control_version`、`playback_mode`、`updated_at` 等可选字段，避免客户端应用实时消息后状态不完整。
+- [x] 如发现 `room.sync` 消息缺少客户端需要的字段，补齐 `control_version`、`playback_mode`、`updated_at` 等可选字段，避免客户端应用实时消息后状态不完整。（`RoomState` 增加 `base_updated_at` 供 snapshot 区分投影时间戳与权威更新时间。）
 
 ### 客户端待办
 
@@ -82,33 +82,33 @@
 
 #### 方案 A：服务端记录房间访问授权（已确定）
 
-- [ ] 新增房间访问授权缓存接口，例如：
+- [x] 新增房间访问授权缓存接口，例如：
   - `GrantRoomAccess(ctx, roomID, userID)`
   - `HasRoomAccess(ctx, roomID, userID) bool`
   - `RevokeRoomAccess(ctx, roomID, userID)`（可选）
   - `DeleteRoomAccess(ctx, roomID)`（房间关闭/删除时清理）
-- [ ] Redis key 建议：
+- [x] Redis key 建议：
   - `room:access:{roomID}` 使用 set 存 userID。
   - 不依赖固定 TTL 表达产品语义；授权直到房间关闭/删除时统一清理。
   - 可保留较长 Redis TTL 作为异常兜底，但业务有效期以房间存在为准。
   - 不使用 key 过期事件或 Keyspace Notifications 来撤销授权；授权撤销必须由房间关闭/删除、空房清理或密码变更等应用层流程显式调用。
-- [ ] `POST /api/rooms/:roomId/join`：
-  - [ ] 如果用户是房主/管理员，跳过密码。
-  - [ ] 如果用户已有该房授权，跳过密码。
-  - [ ] 如果密码校验成功，写入授权记录。
-- [ ] `POST /api/rooms/:roomId/snapshot` 与 `POST /api/ably/token`：
-  - [ ] 支持使用已有授权跳过密码。
-  - [ ] 密码校验成功时也可写入授权，避免 join 与 snapshot/token 时序差异。
-- [ ] `DELETE /api/rooms/:roomId` / 空房清理时同步删除该房授权缓存。
+- [x] `POST /api/rooms/:roomId/join`：
+  - [x] 如果用户是房主/管理员，跳过密码。
+  - [x] 如果用户已有该房授权，跳过密码。
+  - [x] 如果密码校验成功，写入授权记录。
+- [x] `POST /api/rooms/:roomId/snapshot` 与 `POST /api/ably/token`：
+  - [x] 支持使用已有授权跳过密码。
+  - [x] 密码校验成功时也可写入授权，避免 join 与 snapshot/token 时序差异。
+- [x] `DELETE /api/rooms/:roomId` / 空房清理时同步删除该房授权缓存。
 - [ ] 如果未来支持房间密码修改，密码修改时应清理该房已有授权；当前需求未要求实现密码修改。
-- [ ] 修改错误语义：
-  - [ ] 未授权访问私有房仍返回 403。
-  - [ ] 已授权用户不需要再次提交 password。
-- [ ] 补充后端测试：
-  - [ ] 首次输入正确密码 join 成功并写入授权。
-  - [ ] 同一用户同一房间再次 join/snapshot/ably token 不带密码也成功。
-  - [ ] 不同用户不能复用该授权。
-  - [ ] 房间删除后授权失效。
+- [x] 修改错误语义：
+  - [x] 未授权访问私有房仍返回 403。
+  - [x] 已授权用户不需要再次提交 password。
+- [x] 补充后端测试：
+  - [x] 首次输入正确密码 join 成功并写入授权。
+  - [x] 同一用户同一房间再次 join/snapshot/ably token 不带密码也成功。
+  - [x] 不同用户不能复用该授权。
+  - [x] 房间删除后授权失效。
 
 ### 客户端待办
 
@@ -143,19 +143,19 @@
 
 ### 服务端待办
 
-- [ ] 明确产品语义：管理员关闭房间等同删除房间，不需要关闭记录和审计日志。
-- [ ] 梳理当前 `DELETE /api/rooms/:roomId` 是否已满足“关闭房间=删除房间”语义：
-  - [ ] 删除 DB 房间记录。
-  - [ ] 删除 Redis room state。
-  - [ ] 删除 Redis presence。
-  - [ ] 删除私有房访问授权缓存。
-  - [ ] 发布 `room_closed` 事件。
-- [ ] 管理员接口建议：
-  - [ ] `GET /api/admin/rooms`：返回房间列表、owner、在线人数、当前视频、播放状态、创建时间。
-  - [ ] 复用 `DELETE /api/rooms/:roomId` 作为管理员关闭房间接口，文档中明确“关闭=删除房间”。
+- [x] 明确产品语义：管理员关闭房间等同删除房间，不需要关闭记录和审计日志。
+- [x] 梳理当前 `DELETE /api/rooms/:roomId` 是否已满足“关闭房间=删除房间”语义：
+  - [x] 删除 DB 房间记录。
+  - [x] 删除 Redis room state。
+  - [x] 删除 Redis presence。
+  - [x] 删除私有房访问授权缓存。
+  - [x] 发布 `room_closed` 事件。
+- [x] 管理员接口建议：
+  - [x] `GET /api/admin/rooms`：返回房间列表、owner、在线人数、当前视频、播放状态、创建时间。
+  - [x] 复用 `DELETE /api/rooms/:roomId` 作为管理员关闭房间接口，文档中明确“关闭=删除房间”。
   - [ ] 可选：`POST /api/admin/rooms/:roomId/kick/:userId` 与现有 kick 能力对齐。
-- [ ] 统一房间事件命名：
-  - [ ] 客户端目前同时处理 `room_deleted` 和 `room_closed`，后端实际发布 `room_closed`；建议统一保留 `room_closed`。
+- [x] 统一房间事件命名：
+  - [x] 客户端目前同时处理 `room_deleted` 和 `room_closed`，后端实际发布 `room_closed`；建议统一保留 `room_closed`。
 - [ ] 补充后端测试：
   - [ ] 普通用户不能关闭他人房间。
   - [ ] 房主可以关闭自己的房间。
@@ -202,8 +202,8 @@
 
 - 后端已有 `MaybeRunGlobalCleanup`，间隔常量为 `5 * time.Minute`。
 - `NewRouter` 中已通过 `authService.SetAfterLogin` 在登录后调用该清理逻辑。
-- `auth.Service.Register` 与 `auth.Service.Login` 都会调用 `runAfterLogin`；`Refresh` 不会调用。
-- 当前 `runAfterLogin` 同步执行并忽略错误：`_ = s.afterLogin(ctx)`。这能保证错误不返回给登录接口，但仍可能增加登录耗时，且清理失败没有日志或可观测性。
+- `auth.Service.Register` 与 `auth.Service.Login` 都会调用 `runAfterLogin`；`Refresh` 成功后也会触发同样的 `runAfterLogin` 钩子。
+- `runAfterLogin` 在登录/注册/刷新后异步启动清理（后台 `context.WithTimeout`，最长 5 分钟）；清理错误写入标准日志，不阻塞 HTTP 响应。
 - Redis presence 中已有：
   - `global:last_room_cleanup_at`
   - `global:room_cleanup_lock`
@@ -224,38 +224,38 @@
 
 ### 服务端待办
 
-- [ ] 保持 `Register` 触发同样清理：注册后直接获得登录态，视为登录行为。
-- [ ] 明确 `Refresh` 是否也算“任意用户登录/恢复会话”：如果前端主要通过 refresh 恢复登录态，应在 refresh 成功后也异步触发同样检查。
-- [ ] 检查 memory 与 redis 两套 `RoomPresence` 实现行为是否一致：
-  - [ ] last cleanup 时间戳。
-  - [ ] cleanup lock。
-  - [ ] pending empty 标记。
-- [ ] 将清理改为异步触发：
-  - [ ] 登录/注册/可选 refresh 成功后启动后台 goroutine 或任务队列执行 `MaybeRunGlobalCleanup`。
-  - [ ] 不使用会被请求结束取消的 context 直接跑后台任务；应派生带超时的后台 context。
-  - [ ] 清理失败只记录日志/指标，不影响登录响应。
-  - [ ] 登录接口不等待清理完成。
-- [ ] 完善清理策略：
-  - [ ] 用户离开房间后，如果房间在线人数为 0，将 roomID 加入 pending empty。
-  - [ ] 登录触发清理时，如果 `last_cleanup_at` 为空或距今超过 5 分钟，尝试获取 lock。
-  - [ ] 获得 lock 后扫描 pending empty，并补充扫描可能遗漏的房间（例如 DB 房间列表或 `room:active`）来发现“没有在线用户但未进入 pending empty”的房间。
-  - [ ] 判定在线人数时，以真实在线状态为准；需决定服务端是否接入 Ably Presence 查询，或让客户端/服务端可靠同步在线离开事件到 Redis。
+- [x] 保持 `Register` 触发同样清理：注册后直接获得登录态，视为登录行为。
+- [x] 明确 `Refresh` 是否也算“任意用户登录/恢复会话”：如果前端主要通过 refresh 恢复登录态，应在 refresh 成功后也异步触发同样检查。（已实现：`Refresh` 在 `issuePair` 成功后调用 `runAfterLogin`。）
+- [x] 检查 memory 与 redis 两套 `RoomPresence` 实现行为是否一致：
+  - [x] last cleanup 时间戳。
+  - [x] cleanup lock。
+  - [x] pending empty 标记。
+- [x] 将清理改为异步触发：
+  - [x] 登录/注册/可选 refresh 成功后启动后台 goroutine 或任务队列执行 `MaybeRunGlobalCleanup`。
+  - [x] 不使用会被请求结束取消的 context 直接跑后台任务；应派生带超时的后台 context。
+  - [x] 清理失败只记录日志/指标，不影响登录响应。
+  - [x] 登录接口不等待清理完成。
+- [x] 完善清理策略（部分）：
+  - [x] 用户离开房间后，如果房间在线人数为 0，将 roomID 加入 pending empty。（沿用现有 leave/remove 逻辑。）
+  - [x] 登录触发清理时，如果 `last_cleanup_at` 为空或距今超过 5 分钟，尝试获取 lock。
+  - [x] 获得 lock 后扫描 pending empty，并补充扫描可能遗漏的房间（例如 DB 房间列表或 `room:active`）来发现“没有在线用户但未进入 pending empty”的房间。
+  - [ ] 判定在线人数时，以真实在线状态为准；需决定服务端是否接入 Ably Presence 查询，或让客户端/服务端可靠同步在线离开事件到 Redis。（仍为待办：无心跳/Ably presence 查询。）
   - [ ] 如果继续维护服务端 Redis presence，需要增加应用层心跳/续租机制：客户端定期调用轻量 heartbeat API 或服务端通过 Ably/HTTP 明确刷新在线状态；清理任务扫描 `last_seen` 超时用户并主动移除。
   - [ ] heartbeat/last_seen 方案只能通过后端扫描判断超时，不能依赖 Redis key 过期事件触发。
   - [ ] 如果采用 Ably Presence 作为在线事实来源，清理任务应在扫描房间时主动查询 Ably 当前 presence；不要通过 Redis 事件钩子等待通知。
-  - [ ] 对没有在线用户的房间删除 DB 记录、Redis state、presence、授权缓存，并发布 `room_closed`。
-  - [ ] 对已有在线用户重新进入的房间清除 pending empty。
-- [ ] 处理异常与幂等：
-  - [ ] 房间 DB 已不存在时不阻断清理。
-  - [ ] Redis key 缺失时不阻断清理。
-  - [ ] 多实例并发登录时只有一个实例执行清理。
-  - [ ] 清理失败不影响用户登录成功，但必须记录日志，便于排查“没有触发”的线上问题。
+  - [x] 对没有在线用户的房间删除 DB 记录、Redis state、presence、授权缓存，并发布 `room_closed`。
+  - [x] 对已有在线用户重新进入的房间清除 pending empty。（JoinRoom Lua / memory 在加入时 `SREM pending`。）
+- [x] 处理异常与幂等（部分）：
+  - [x] 房间 DB 已不存在时不阻断清理。（`Delete` 遇 `ErrNotFound` 仍清理 state/presence/access。）
+  - [x] Redis key 缺失时不阻断清理。
+  - [x] 多实例并发登录时只有一个实例执行清理。
+  - [x] 清理失败不影响用户登录成功，但必须记录日志，便于排查“没有触发”的线上问题。
 - [ ] 补充后端测试：
   - [ ] 距离上次清理不足 5 分钟时不执行清理。
   - [ ] 超过 5 分钟时执行清理并更新时间戳。
   - [ ] lock 获取失败时不执行清理。
   - [ ] 没有在线用户的房间被删除，有在线用户的房间保留。
-  - [ ] 未进入 pending empty 但没有在线用户的房间也能被发现并清理。
+  - [x] 未进入 pending empty 但没有在线用户的房间也能被发现并清理。（`RunEmptyRoomCleanup` 合并 DB 列表与 `room:active` 扫描；单测 `TestRunEmptyRoomCleanupRemovesDBOnlyEmptyRoom`。）
   - [ ] 登录流程中清理错误不影响登录响应，且错误被记录。
 
 ### 客户端待办
@@ -280,34 +280,34 @@
 
 ### 服务端待办
 
-- [ ] 修改 presence `JoinRoom` 语义：
-  - [ ] 如果用户不在任何房间，正常加入。
-  - [ ] 如果用户已在同一房间，视为幂等成功。
-  - [ ] 如果用户已在其他房间，从旧房间成员列表移除，再加入新房间。
-  - [ ] 返回 `leftRoomID`，供上层发布离开事件或做清理。
-- [ ] Redis Lua 脚本需原子完成：
-  - [ ] 读取 `user:room:{userID}` 的旧 roomID。
-  - [ ] 若旧房间不同，`HDEL room:members:{oldRoomID} userID`。
-  - [ ] 如果旧房间成员数变为 0，移出 `room:active` 并加入 `room:pending_empty`。
-  - [ ] `HSET room:members:{newRoomID}` 并更新 `user:room:{userID}`。
-  - [ ] 返回旧 roomID 或空字符串。
-- [ ] 该 Redis 迁移逻辑只使用普通 Lua `EVAL` 与基础数据结构，不使用 Redis Functions/Triggers；所有 `user_left`、`user_joined` 事件由后端 join/leave handler 显式发布。
-- [ ] memory presence 实现保持同样行为，避免测试与本地开发表现不一致。
-- [ ] `room.Service.Join` 保留返回 `previousRoomID`，并在 handler 中不再将该场景映射为 409。
-- [ ] 用户加入房间成功时，向目标房间发布 `user_joined` 事件，事件 payload 至少包含 user id、username、role、is_owner。
-- [ ] 用户主动离开房间时，向原房间发布 `user_left` 事件，事件 payload 包含用户信息。
-- [ ] 如果 `previousRoomID` 不为空：
-  - [ ] 向旧房间发布 `user_left` 事件，便于旧房间客户端展示“某某已离开”并更新成员。
-  - [ ] 向新房间发布 `user_joined` 事件，便于新房间客户端展示“某某已加入”。
-  - [ ] 如旧房间为空，进入 pending empty，等待清理。
-- [ ] 设计响应体是否需要包含 `left_room_id`：
-  - [ ] 推荐在 join 响应中保留 room 信息，并可选增加 `left_room_id`，方便客户端提示“已从旧房间退出”。
-- [ ] 补充后端测试：
-  - [ ] 用户从房间 A 加入房间 B，A 的成员被移除，B 的成员存在。
-  - [ ] A 若为空则加入 pending empty。
-  - [ ] 重复加入 B 幂等成功。
-  - [ ] 不再返回 409。
-  - [ ] Redis 与 memory 实现一致。
+- [x] 修改 presence `JoinRoom` 语义：
+  - [x] 如果用户不在任何房间，正常加入。
+  - [x] 如果用户已在同一房间，视为幂等成功。
+  - [x] 如果用户已在其他房间，从旧房间成员列表移除，再加入新房间。
+  - [x] 返回 `leftRoomID`，供上层发布离开事件或做清理。
+- [x] Redis Lua 脚本需原子完成：
+  - [x] 读取 `user:room:{userID}` 的旧 roomID。
+  - [x] 若旧房间不同，`HDEL room:members:{oldRoomID} userID`。
+  - [x] 如果旧房间成员数变为 0，移出 `room:active` 并加入 `room:pending_empty`。
+  - [x] `HSET room:members:{newRoomID}` 并更新 `user:room:{userID}`。
+  - [x] 返回旧 roomID 或空字符串。
+- [x] 该 Redis 迁移逻辑只使用普通 Lua `EVAL` 与基础数据结构，不使用 Redis Functions/Triggers；所有 `user_left`、`user_joined` 事件由后端 join/leave handler 显式发布。
+- [x] memory presence 实现保持同样行为，避免测试与本地开发表现不一致。
+- [x] `room.Service.Join` 保留返回 `previousRoomID`，并在 handler 中不再将该场景映射为 409。
+- [x] 用户加入房间成功时，向目标房间发布 `user_joined` 事件，事件 payload 至少包含 user id、username、role、is_owner。
+- [x] 用户主动离开房间时，向原房间发布 `user_left` 事件，事件 payload 包含用户信息。
+- [x] 如果 `previousRoomID` 不为空：
+  - [x] 向旧房间发布 `user_left` 事件，便于旧房间客户端展示“某某已离开”并更新成员。
+  - [x] 向新房间发布 `user_joined` 事件，便于新房间客户端展示“某某已加入”。
+  - [x] 如旧房间为空，进入 pending empty，等待清理。
+- [x] 设计响应体是否需要包含 `left_room_id`：
+  - [x] 推荐在 join 响应中保留 room 信息，并可选增加 `left_room_id`，方便客户端提示“已从旧房间退出”。
+- [x] 补充后端测试：
+  - [x] 用户从房间 A 加入房间 B，A 的成员被移除，B 的成员存在。
+  - [ ] A 若为空则加入 pending empty。（逻辑已在 Lua；可补充断言单测。）
+  - [x] 重复加入 B 幂等成功。
+  - [x] 不再返回 409。
+  - [ ] Redis 与 memory 实现一致。（memory 已对齐；Redis Lua 路径建议 CI 用 miniredis 等补充。）
 
 ### 客户端待办
 
@@ -339,29 +339,29 @@
 
 ### 现有接口需要明确/增强
 
-- [ ] `POST /api/rooms/:roomId/join`
+- [x] `POST /api/rooms/:roomId/join`
   - 请求：`{ "password": "optional" }`
   - 响应建议：`{ room fields..., "is_owner": bool, "left_room_id": "optional" }`
   - 行为：已授权私有房可不传密码；已在其他房间时自动迁移。
-- [ ] `POST /api/rooms/:roomId/snapshot`
+- [x] `POST /api/rooms/:roomId/snapshot`
   - 请求：`{ "password": "optional" }`
   - 行为：已授权私有房可不传密码。
-  - 响应：`state.action` 必须准确表达当前播放状态。
-- [ ] `POST /api/ably/token`
+  - 响应：`state.action` 必须准确表达当前播放状态；`state.base_updated_at` 为控制写入时间（投影前）。
+- [x] `POST /api/ably/token`
   - 请求：`{ "room_id": "...", "purpose": "room", "password": "optional" }`
   - 行为：已授权私有房可不传密码。
-- [ ] `DELETE /api/rooms/:roomId`
+- [x] `DELETE /api/rooms/:roomId`
   - 行为：房主或管理员关闭/删除房间；关闭等同删除。
   - 响应：204。
   - 事件：发布 `room_closed`。
-- [ ] `room.event`
+- [x] `room.event`
   - `user_joined`：用户加入房间时发布，客户端展示“某某已加入”。
   - `user_left`：用户主动离开或自动切换离开旧房间时发布，客户端展示“某某已离开”。
   - `room_closed`：房间关闭/删除时发布，客户端提示并返回大厅。
 
 ### 可新增接口
 
-- [ ] `GET /api/admin/rooms`
+- [x] `GET /api/admin/rooms`
   - 管理员查看房间监控信息。
 - [ ] `GET /api/rooms/:roomId/access`
   - 可选：客户端进入前查询是否已授权私有房；不推荐作为必要路径，优先让 join/snapshot/token 自身处理授权。
@@ -378,8 +378,8 @@
 
 ### 后端
 
-- [ ] 运行现有 Go 测试：`go test ./...`。
-- [ ] 为房间同步、私有房授权、presence 迁移、空房清理、管理员关闭房间补充单元/集成测试。
+- [x] 运行现有 Go 测试：`go test ./...`。
+- [ ] 为房间同步、私有房授权、presence 迁移、空房清理、管理员关闭房间补充单元/集成测试。（已部分补充：snapshot play/pause、私有房授权、跨房 join、空房 DB 幽灵清理、admin rooms 列表探测。）
 - [ ] Redis 实现需要覆盖 Lua 脚本关键路径；memory 实现用于快速单测但不能替代 Redis 行为验证。
 - [ ] Redis 相关测试与实现不得依赖 Redis Stack、Redis Functions、Triggers、Gears 或 Keyspace Notifications；CI/本地可用普通 Redis 验证。
 - [ ] 空房清理测试应通过显式心跳过期/last_seen 扫描、pending empty 扫描或 Ably presence 查询 mock 来验证，不使用 key 过期事件作为触发条件。

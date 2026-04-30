@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -28,6 +30,7 @@ type Dependencies struct {
 	SessionCache      cache.SessionCache
 	RoomStateCache    cache.RoomStateCache
 	RoomPresence      cache.RoomPresence
+	RoomAccess        cache.RoomAccessCache
 	PubSub            cache.PubSub
 	Realtime          realtime.Service
 	Capabilities      capabilities.Report
@@ -55,12 +58,20 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	router.StaticFS("/static/posters", http.Dir(deps.Config.PosterDir))
 
 	authService := auth.NewService(deps.UserStore, deps.SessionCache, deps.Config)
-	rooms := roomhub.NewService(deps.RoomStateCache, deps.RoomPresence, deps.RoomStore, deps.VideoStore, deps.Realtime)
+	rooms := roomhub.NewService(deps.RoomStateCache, deps.RoomPresence, deps.RoomStore, deps.VideoStore, deps.RoomAccess, deps.Realtime)
 	authService.SetAfterLogin(func(ctx context.Context) error {
-		return rooms.MaybeRunGlobalCleanup(ctx)
+		go func() {
+			bg, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			if err := rooms.MaybeRunGlobalCleanup(bg); err != nil {
+				log.Printf("room global cleanup: %v", err)
+			}
+		}()
+		return nil
 	})
 	registerCapabilityRoutes(router, deps)
 	registerAuthRoutes(router, deps, authService)
+	registerAdminRoomRoutes(router, deps, authService, rooms)
 	registerRoomRoutes(router, deps, authService, rooms)
 	registerDownloadRoutes(router, deps, authService)
 	registerVideoRoutes(router, deps, authService)

@@ -53,6 +53,7 @@ func testDeps(stores *memoryStores) Dependencies {
 		SessionCache:      memory.NewSessionCache(),
 		RoomStateCache:    memory.NewRoomStateCache(),
 		RoomPresence:      memory.NewRoomPresence(),
+		RoomAccess:        memory.NewRoomAccess(),
 		PubSub:            memory.NewPubSub(),
 	}
 }

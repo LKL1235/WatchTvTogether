@@ -76,17 +76,18 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 		t.Fatalf("create room B status = %d body = %s", roomB.Code, roomB.Body.String())
 	}
 	roomBID := stringField(t, roomB.Body.Bytes(), "id")
-	conflictJoin := postJSON(t, server.URL+"/api/rooms/"+roomBID+"/join", memberAccess, map[string]string{})
-	if conflictJoin.Code != http.StatusConflict {
-		t.Fatalf("join second room should conflict, got %d body = %s", conflictJoin.Code, conflictJoin.Body.String())
+	joinBFromA := postJSON(t, server.URL+"/api/rooms/"+roomBID+"/join", memberAccess, map[string]string{})
+	if joinBFromA.Code != http.StatusOK {
+		t.Fatalf("join second room should succeed with auto-leave, got %d body = %s", joinBFromA.Code, joinBFromA.Body.String())
 	}
-	leaveA := postJSON(t, server.URL+"/api/rooms/"+roomID+"/leave", memberAccess, map[string]string{})
-	if leaveA.Code != http.StatusNoContent {
-		t.Fatalf("leave A status = %d body = %s", leaveA.Code, leaveA.Body.String())
+	if got := stringField(t, joinBFromA.Body.Bytes(), "left_room_id"); got != roomID {
+		t.Fatalf("left_room_id = %q want %q body=%s", got, roomID, joinBFromA.Body.String())
 	}
-	joinB := postJSON(t, server.URL+"/api/rooms/"+roomBID+"/join", memberAccess, map[string]string{})
-	if joinB.Code != http.StatusOK {
-		t.Fatalf("join B status = %d body = %s", joinB.Code, joinB.Body.String())
+	if n, err := deps.RoomPresence.MemberCount(context.Background(), roomID); err != nil || n != 0 {
+		t.Fatalf("room A member count = %d err=%v", n, err)
+	}
+	if n, err := deps.RoomPresence.MemberCount(context.Background(), roomBID); err != nil || n != 1 {
+		t.Fatalf("room B member count = %d err=%v", n, err)
 	}
 
 	memberControl := postJSON(t, server.URL+"/api/rooms/"+roomID+"/control", memberAccess, map[string]any{
@@ -111,8 +112,15 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	if got := stringField(t, ownerControl.Body.Bytes(), "type"); got != "sync" {
 		t.Fatalf("control type = %q body = %s", got, ownerControl.Body.String())
 	}
-	if len(realtime.published) != 1 || realtime.published[0].Name != "room.sync" {
-		t.Fatalf("published messages = %#v", realtime.published)
+	var syncPub *publishedMessage
+	for i := len(realtime.published) - 1; i >= 0; i-- {
+		if realtime.published[i].Name == "room.sync" {
+			syncPub = &realtime.published[i]
+			break
+		}
+	}
+	if syncPub == nil || syncPub.Data.ControlVersion != 1 || syncPub.Data.PlaybackMode != model.PlaybackModeSequential {
+		t.Fatalf("missing room.sync with metadata, published = %#v", realtime.published)
 	}
 
 	state := getJSON(t, server.URL+"/api/rooms/"+roomID+"/state", ownerAccess)
@@ -163,6 +171,13 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 		"password": "password123",
 	})
 	adminToken := tokenFrom(t, adminLogin.Body.Bytes(), "access_token")
+	adminRooms := getJSON(t, server.URL+"/api/admin/rooms?limit=10", adminToken)
+	if adminRooms.Code != http.StatusOK {
+		t.Fatalf("admin rooms list status = %d body = %s", adminRooms.Code, adminRooms.Body.String())
+	}
+	if numericField(t, adminRooms.Body.Bytes(), "total") < 1 {
+		t.Fatalf("admin rooms total: %s", adminRooms.Body.String())
+	}
 	debug := getJSON(t, server.URL+"/api/admin/debug/rooms", adminToken)
 	if debug.Code != http.StatusOK {
 		t.Fatalf("debug rooms status = %d body = %s", debug.Code, debug.Body.String())
@@ -241,6 +256,150 @@ func TestPrivateRoomRequiresPasswordForJoinSnapshotAndToken(t *testing.T) {
 	}
 	if ownerSnapshot := postJSON(t, server.URL+"/api/rooms/"+roomID+"/snapshot", ownerAccess, map[string]string{}); ownerSnapshot.Code != http.StatusOK {
 		t.Fatalf("owner snapshot status = %d body = %s", ownerSnapshot.Code, ownerSnapshot.Body.String())
+	}
+}
+
+func TestPrivateRoomAccessSkipsPasswordOnRepeat(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := openTestDB(t)
+	deps := testDeps(db)
+	deps.Realtime = newFakeRealtime("watchtogether")
+	router := NewRouter(deps)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	owner := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
+		"username": "owner",
+		"password": "password123",
+	})
+	ownerAccess := tokenFrom(t, owner.Body.Bytes(), "access_token")
+	create := postJSON(t, server.URL+"/api/rooms", ownerAccess, map[string]string{
+		"name":       "Secret",
+		"visibility": "private",
+		"password":   "room-pass",
+	})
+	roomID := stringField(t, create.Body.Bytes(), "id")
+
+	member := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
+		"username": "member",
+		"password": "password123",
+	})
+	memberAccess := tokenFrom(t, member.Body.Bytes(), "access_token")
+	other := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
+		"username": "other",
+		"password": "password123",
+	})
+	otherAccess := tokenFrom(t, other.Body.Bytes(), "access_token")
+
+	if postJSON(t, server.URL+"/api/rooms/"+roomID+"/join", memberAccess, map[string]string{}).Code != http.StatusForbidden {
+		t.Fatal("join without password should be forbidden before grant")
+	}
+	if postJSON(t, server.URL+"/api/rooms/"+roomID+"/join", memberAccess, map[string]string{"password": "room-pass"}).Code != http.StatusOK {
+		t.Fatal("join with password should succeed")
+	}
+	if postJSON(t, server.URL+"/api/rooms/"+roomID+"/leave", memberAccess, map[string]string{}).Code != http.StatusNoContent {
+		t.Fatal("leave should succeed")
+	}
+	if postJSON(t, server.URL+"/api/rooms/"+roomID+"/join", memberAccess, map[string]string{}).Code != http.StatusOK {
+		t.Fatal("join without password should succeed after grant")
+	}
+	if postJSON(t, server.URL+"/api/rooms/"+roomID+"/snapshot", memberAccess, map[string]string{}).Code != http.StatusOK {
+		t.Fatal("snapshot without password should succeed after grant")
+	}
+	if postJSON(t, server.URL+"/api/ably/token", memberAccess, map[string]string{"room_id": roomID, "purpose": "room"}).Code != http.StatusOK {
+		t.Fatal("ably token without password should succeed after grant")
+	}
+	if postJSON(t, server.URL+"/api/rooms/"+roomID+"/join", otherAccess, map[string]string{}).Code != http.StatusForbidden {
+		t.Fatal("other user must still need password")
+	}
+	if deleteJSON(t, server.URL+"/api/rooms/"+roomID, ownerAccess).Code != http.StatusNoContent {
+		t.Fatal("owner delete room should succeed")
+	}
+	if ok, _ := deps.RoomAccess.HasRoomAccess(context.Background(), roomID, userIDFrom(t, member.Body.Bytes())); ok {
+		t.Fatal("access should be cleared after room close")
+	}
+}
+
+func TestSnapshotPlayAndPauseReflectsRoomState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := openTestDB(t)
+	deps := testDeps(db)
+	deps.Realtime = newFakeRealtime("watchtogether")
+	router := NewRouter(deps)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	vid := "vid-snap-test"
+	_ = deps.VideoStore.Create(context.Background(), &model.Video{
+		ID:       vid,
+		Title:    "t",
+		FilePath: "/x",
+		Duration: 100,
+		Status:   model.VideoStatusReady,
+	})
+
+	owner := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
+		"username": "snapowner",
+		"password": "password123",
+	})
+	ownerAccess := tokenFrom(t, owner.Body.Bytes(), "access_token")
+	create := postJSON(t, server.URL+"/api/rooms", ownerAccess, map[string]string{
+		"name": "R", "visibility": "public",
+	})
+	roomID := stringField(t, create.Body.Bytes(), "id")
+
+	play := postJSON(t, server.URL+"/api/rooms/"+roomID+"/control", ownerAccess, map[string]any{
+		"action": "play", "position": 10.0, "video_id": vid, "queue": []string{vid},
+	})
+	if play.Code != http.StatusOK {
+		t.Fatalf("control play: %d %s", play.Code, play.Body.String())
+	}
+	member := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
+		"username": "snapmember", "password": "password123",
+	})
+	memberAccess := tokenFrom(t, member.Body.Bytes(), "access_token")
+	postJSON(t, server.URL+"/api/rooms/"+roomID+"/join", memberAccess, map[string]string{})
+	snap := postJSON(t, server.URL+"/api/rooms/"+roomID+"/snapshot", memberAccess, map[string]string{})
+	if snap.Code != http.StatusOK {
+		t.Fatalf("snapshot: %d %s", snap.Code, snap.Body.String())
+	}
+	var body struct {
+		State struct {
+			Action   string  `json:"action"`
+			Position float64 `json:"position"`
+		} `json:"state"`
+	}
+	if err := json.Unmarshal(snap.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.State.Action != string(model.PlaybackActionPlay) {
+		t.Fatalf("action = %q want play", body.State.Action)
+	}
+	if body.State.Position < 10 || body.State.Position > 15 {
+		t.Fatalf("position = %v want ~10-15 (projection)", body.State.Position)
+	}
+
+	pause := postJSON(t, server.URL+"/api/rooms/"+roomID+"/control", ownerAccess, map[string]any{
+		"action": "pause", "position": 22.0, "video_id": vid, "queue": []string{vid},
+	})
+	if pause.Code != http.StatusOK {
+		t.Fatalf("control pause: %d %s", pause.Code, pause.Body.String())
+	}
+	snap2 := postJSON(t, server.URL+"/api/rooms/"+roomID+"/snapshot", memberAccess, map[string]string{})
+	var body2 struct {
+		State struct {
+			Action   string  `json:"action"`
+			Position float64 `json:"position"`
+		} `json:"state"`
+	}
+	if err := json.Unmarshal(snap2.Body.Bytes(), &body2); err != nil {
+		t.Fatal(err)
+	}
+	if body2.State.Action != string(model.PlaybackActionPause) {
+		t.Fatalf("action = %q want pause", body2.State.Action)
+	}
+	if body2.State.Position != 22 {
+		t.Fatalf("position = %v want 22", body2.State.Position)
 	}
 }
 

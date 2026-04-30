@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"watchtogether/internal/cache"
-	"watchtogether/internal/store"
 )
 
 type RoomPresence struct {
@@ -40,8 +39,10 @@ func (p *RoomPresence) JoinRoom(ctx context.Context, roomID, userID, username st
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	var leftRoomID string
 	if prev, ok := p.userRoom[userID]; ok && prev != roomID {
-		return "", store.ErrConflict
+		leftRoomID = prev
+		p.removeMemberLocked(prev, userID)
 	}
 
 	m, ok := p.members[roomID]
@@ -53,7 +54,7 @@ func (p *RoomPresence) JoinRoom(ctx context.Context, roomID, userID, username st
 	p.userRoom[userID] = roomID
 	p.activeRooms[roomID] = struct{}{}
 	delete(p.pendingEmpty, roomID)
-	return "", nil
+	return leftRoomID, nil
 }
 
 func (p *RoomPresence) LeaveRoom(ctx context.Context, roomID, userID string) error {

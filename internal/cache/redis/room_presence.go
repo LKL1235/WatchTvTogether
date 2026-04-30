@@ -8,7 +8,6 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"watchtogether/internal/cache"
-	"watchtogether/internal/store"
 )
 
 const (
@@ -40,46 +39,55 @@ const keyPendingEmpty = "room:pending_empty"
 const keyLastCleanup = "global:last_room_cleanup_at"
 const keyCleanupLock = "global:room_cleanup_lock"
 
-// joinScriptStrict rejects join when user is already in a different room (returns -1).
-const joinScriptStrict = `
+// joinScriptMigrate atomically leaves the previous room (if any and different), then joins newRoom.
+// Returns the left room id as a string, or empty string when the user was not in another room.
+const joinScriptMigrate = `
 local userRoomKey = KEYS[1]
-local membersKey = KEYS[2]
+local newMembersKey = KEYS[2]
 local activeKey = KEYS[3]
 local pendingKey = KEYS[4]
 local newRoom = ARGV[1]
 local userId = ARGV[2]
 local username = ARGV[3]
-local ttl = tonumber(ARGV[4])
+local memberTTL = tonumber(ARGV[4])
+local globalTTL = tonumber(ARGV[5])
 
+local leftRoom = ''
 local oldRoom = redis.call('GET', userRoomKey)
 if oldRoom and oldRoom ~= newRoom then
-  return '-1'
+  leftRoom = oldRoom
+  local oldMembersKey = 'room:members:' .. oldRoom
+  redis.call('HDEL', oldMembersKey, userId)
+  local n = redis.call('HLEN', oldMembersKey)
+  if n == 0 then
+    redis.call('SREM', activeKey, oldRoom)
+    redis.call('DEL', oldMembersKey)
+    redis.call('SADD', pendingKey, oldRoom)
+    redis.call('EXPIRE', pendingKey, globalTTL)
+  end
 end
 
-redis.call('HSET', membersKey, userId, username)
-redis.call('EXPIRE', membersKey, ttl)
-redis.call('SET', userRoomKey, newRoom, 'EX', ttl)
+redis.call('HSET', newMembersKey, userId, username)
+redis.call('EXPIRE', newMembersKey, memberTTL)
+redis.call('SET', userRoomKey, newRoom, 'EX', memberTTL)
 redis.call('SADD', activeKey, newRoom)
-redis.call('EXPIRE', activeKey, ttl)
+redis.call('EXPIRE', activeKey, memberTTL)
 redis.call('SREM', pendingKey, newRoom)
-return 'ok'
+return leftRoom
 `
 
 func (p *RoomPresence) JoinRoom(ctx context.Context, roomID, userID, username string) (string, error) {
-	res, err := p.client.Eval(ctx, joinScriptStrict, []string{
+	res, err := p.client.Eval(ctx, joinScriptMigrate, []string{
 		p.userRoomKey(userID),
 		p.membersKey(roomID),
 		keyActiveRooms,
 		keyPendingEmpty,
-	}, roomID, userID, username, int(p.ttl.Seconds())).Result()
+	}, roomID, userID, username, int(p.ttl.Seconds()), int(globalKeyTTL.Seconds())).Result()
 	if err != nil {
 		return "", err
 	}
 	s, _ := res.(string)
-	if s == "-1" {
-		return "", store.ErrConflict
-	}
-	return "", nil
+	return s, nil
 }
 
 func (p *RoomPresence) LeaveRoom(ctx context.Context, roomID, userID string) error {
