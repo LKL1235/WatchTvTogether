@@ -32,9 +32,6 @@ type Config struct {
 	JWTRefreshTTLRaw  string        `yaml:"jwt_refresh_ttl"`
 	StorageDir        string        `yaml:"storage_dir"`
 	PosterDir         string        `yaml:"poster_dir"`
-	DownloadWorkers   int           `yaml:"download_workers"`
-	Aria2RPCURL       string        `yaml:"aria2_rpc_url"`
-	Aria2Secret       string        `yaml:"aria2_secret"`
 	CorsOrigins       []string      `yaml:"cors_origins"`
 	AblyRootKey       string        `yaml:"ably_root_key"`
 	AblyTokenTTL      time.Duration `yaml:"-"`
@@ -69,8 +66,6 @@ func Default() Config {
 		JWTRefreshTTLRaw:         "168h",
 		StorageDir:               "./data/videos",
 		PosterDir:                "./data/posters",
-		DownloadWorkers:          2,
-		Aria2RPCURL:              "http://localhost:6800/jsonrpc",
 		AblyTokenTTLRaw:          "30m",
 		AblyJWTTTLRaw:            "",
 		AblyChannelPrefix:        "watchtogether",
@@ -138,9 +133,6 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.JWTRefreshTTLRaw, "JWT_REFRESH_TTL")
 	setString(&cfg.StorageDir, "STORAGE_DIR")
 	setString(&cfg.PosterDir, "POSTER_DIR")
-	setInt(&cfg.DownloadWorkers, "DOWNLOAD_WORKERS")
-	setString(&cfg.Aria2RPCURL, "ARIA2_RPC_URL")
-	setString(&cfg.Aria2Secret, "ARIA2_SECRET")
 	setString(&cfg.AblyRootKey, "ABLY_ROOT_KEY")
 	setString(&cfg.AblyTokenTTLRaw, "ABLY_TOKEN_TTL")
 	setString(&cfg.AblyJWTTTLRaw, "ABLY_JWT_TTL")
@@ -270,9 +262,6 @@ func (c *Config) normalize() error {
 	c.AblyChannelPrefix = strings.TrimSpace(c.AblyChannelPrefix)
 	if c.AblyChannelPrefix == "" {
 		c.AblyChannelPrefix = "watchtogether"
-	}
-	if c.DownloadWorkers <= 0 {
-		c.DownloadWorkers = 2
 	}
 	return nil
 }

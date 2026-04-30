@@ -61,28 +61,6 @@ type Video struct {
 	UpdatedAt  time.Time   `json:"updated_at"`
 }
 
-type DownloadTaskStatus string
-
-const (
-	DownloadTaskPending   DownloadTaskStatus = "pending"
-	DownloadTaskRunning   DownloadTaskStatus = "running"
-	DownloadTaskCompleted DownloadTaskStatus = "completed"
-	DownloadTaskFailed    DownloadTaskStatus = "failed"
-	DownloadTaskCanceled  DownloadTaskStatus = "canceled"
-)
-
-type DownloadTask struct {
-	ID        string             `json:"id"`
-	UserID    string             `json:"user_id"`
-	SourceURL string             `json:"source_url"`
-	VideoID   string             `json:"video_id,omitempty"`
-	Progress  float64            `json:"progress"`
-	Status    DownloadTaskStatus `json:"status"`
-	Error     string             `json:"error,omitempty"`
-	CreatedAt time.Time          `json:"created_at"`
-	UpdatedAt time.Time          `json:"updated_at"`
-}
-
 type PlaybackAction string
 
 const (

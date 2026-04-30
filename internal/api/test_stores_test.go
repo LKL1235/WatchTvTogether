@@ -17,19 +17,17 @@ import (
 )
 
 type memoryStores struct {
-	mu            sync.RWMutex
-	users         map[string]*model.User
-	rooms         map[string]*model.Room
-	videos        map[string]*model.Video
-	downloadTasks map[string]*model.DownloadTask
+	mu     sync.RWMutex
+	users  map[string]*model.User
+	rooms  map[string]*model.Room
+	videos map[string]*model.Video
 }
 
 func newMemoryStores() *memoryStores {
 	return &memoryStores{
-		users:         make(map[string]*model.User),
-		rooms:         make(map[string]*model.Room),
-		videos:        make(map[string]*model.Video),
-		downloadTasks: make(map[string]*model.DownloadTask),
+		users:  make(map[string]*model.User),
+		rooms:  make(map[string]*model.Room),
+		videos: make(map[string]*model.Video),
 	}
 }
 
@@ -52,18 +50,17 @@ func testDeps(stores *memoryStores) Dependencies {
 	cfg.StorageDir = "."
 	cfg.PosterDir = "."
 	return Dependencies{
-		Config:            cfg,
-		UserStore:         stores,
-		RoomStore:         memoryRoomStore{stores},
-		VideoStore:        memoryVideoStore{stores},
-		DownloadTaskStore: memoryDownloadTaskStore{stores},
-		EmailSender:       testHookEmailSender{},
-		EmailCodes:        emailcode.NewStore(nil),
-		SessionCache:      memory.NewSessionCache(),
-		RoomStateCache:    memory.NewRoomStateCache(),
-		RoomPresence:      memory.NewRoomPresence(),
-		RoomAccess:        memory.NewRoomAccess(),
-		PubSub:            memory.NewPubSub(),
+		Config:         cfg,
+		UserStore:      stores,
+		RoomStore:      memoryRoomStore{stores},
+		VideoStore:     memoryVideoStore{stores},
+		EmailSender:    testHookEmailSender{},
+		EmailCodes:     emailcode.NewStore(nil),
+		SessionCache:   memory.NewSessionCache(),
+		RoomStateCache: memory.NewRoomStateCache(),
+		RoomPresence:   memory.NewRoomPresence(),
+		RoomAccess:     memory.NewRoomAccess(),
+		PubSub:         memory.NewPubSub(),
 	}
 }
 
@@ -358,107 +355,6 @@ func (s memoryVideoStore) UpdateStatus(ctx context.Context, id string, status mo
 
 func (s memoryVideoStore) Delete(ctx context.Context, id string) error {
 	return s.DeleteVideo(ctx, id)
-}
-
-func (s *memoryStores) CreateDownloadTask(_ context.Context, task *model.DownloadTask) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := time.Now().UTC()
-	if task.ID == "" {
-		task.ID = uuid.NewString()
-	}
-	if task.CreatedAt.IsZero() {
-		task.CreatedAt = now
-	}
-	task.UpdatedAt = now
-	copyTask := *task
-	s.downloadTasks[task.ID] = &copyTask
-	return nil
-}
-
-func (s *memoryStores) GetDownloadTaskByID(_ context.Context, id string) (*model.DownloadTask, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	task, ok := s.downloadTasks[id]
-	if !ok {
-		return nil, store.ErrNotFound
-	}
-	copyTask := *task
-	return &copyTask, nil
-}
-
-func (s *memoryStores) ListDownloadTasks(_ context.Context) ([]*model.DownloadTask, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	tasks := make([]*model.DownloadTask, 0, len(s.downloadTasks))
-	for _, task := range s.downloadTasks {
-		copyTask := *task
-		tasks = append(tasks, &copyTask)
-	}
-	return tasks, nil
-}
-
-func (s *memoryStores) UpdateDownloadTaskProgress(_ context.Context, id string, progress float64, status model.DownloadTaskStatus) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	task, ok := s.downloadTasks[id]
-	if !ok {
-		return store.ErrNotFound
-	}
-	copyTask := *task
-	copyTask.Progress = progress
-	copyTask.Status = status
-	copyTask.UpdatedAt = time.Now().UTC()
-	s.downloadTasks[id] = &copyTask
-	return nil
-}
-
-func (s *memoryStores) UpdateDownloadTaskResult(_ context.Context, task *model.DownloadTask) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.downloadTasks[task.ID]; !ok {
-		return store.ErrNotFound
-	}
-	task.UpdatedAt = time.Now().UTC()
-	copyTask := *task
-	s.downloadTasks[task.ID] = &copyTask
-	return nil
-}
-
-func (s *memoryStores) DeleteDownloadTask(_ context.Context, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.downloadTasks[id]; !ok {
-		return store.ErrNotFound
-	}
-	delete(s.downloadTasks, id)
-	return nil
-}
-
-type memoryDownloadTaskStore struct{ *memoryStores }
-
-func (s memoryDownloadTaskStore) Create(ctx context.Context, task *model.DownloadTask) error {
-	return s.CreateDownloadTask(ctx, task)
-}
-
-func (s memoryDownloadTaskStore) GetByID(ctx context.Context, id string) (*model.DownloadTask, error) {
-	return s.GetDownloadTaskByID(ctx, id)
-}
-
-func (s memoryDownloadTaskStore) List(ctx context.Context) ([]*model.DownloadTask, error) {
-	return s.ListDownloadTasks(ctx)
-}
-
-func (s memoryDownloadTaskStore) UpdateProgress(ctx context.Context, id string, progress float64, status model.DownloadTaskStatus) error {
-	return s.UpdateDownloadTaskProgress(ctx, id, progress, status)
-}
-
-func (s memoryDownloadTaskStore) UpdateResult(ctx context.Context, task *model.DownloadTask) error {
-	return s.UpdateDownloadTaskResult(ctx, task)
-}
-
-func (s memoryDownloadTaskStore) Delete(ctx context.Context, id string) error {
-	return s.DeleteDownloadTask(ctx, id)
 }
 
 // testHookEmailSender pretends email is enabled so register/reset code paths can run in tests without Resend.

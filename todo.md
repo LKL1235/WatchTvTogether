@@ -10,36 +10,36 @@
 
 ### 1. 业务与 API
 
-- [ ] 删除 `internal/download` 包及 `internal/api/download_handlers.go` 中的管理端路由：`POST/GET/DELETE /api/admin/downloads` 等；在 `internal/api/router.go` 中取消 `registerDownloadRoutes`。
-- [ ] 在 `cmd/server/main.go` 中移除 `DownloadService` 的构造、`Start`、context cancel，以及 `Dependencies` / handler 注入里的下载服务。
-- [ ] 梳理是否仍存在依赖「本机 `StorageDir` 上的视频文件」的接口（例如 `GET /api/videos/:id/file` 走 `c.FileAttachment`）。在纯 Vercel 场景下需明确：**视频来源改为外链 / HLS URL、或对象存储（S3/R2）+ 签名 URL** 等，并在待办中拆出独立里程碑（本清单不展开实现细节）。
-- [ ] 若通过 Ably 或其它通道广播 `admin:downloads`（`internal/download/service.go` 中的 `UpdatesChannel`），删除相关发布与文档说明。
+- [x] 删除 `internal/download` 包及 `internal/api/download_handlers.go` 中的管理端路由：`POST/GET/DELETE /api/admin/downloads` 等；在 `internal/api/router.go` 中取消 `registerDownloadRoutes`。
+- [x] 在 `cmd/server/main.go` 中移除 `DownloadService` 的构造、`Start`、context cancel，以及 `Dependencies` / handler 注入里的下载服务。
+- [x] 梳理是否仍存在依赖「本机 `StorageDir` 上的视频文件」的接口（例如 `GET /api/videos/:id/file` 走 `c.FileAttachment`）。在纯 Vercel 场景下需明确：**视频来源改为外链 / HLS URL、或对象存储（S3/R2）+ 签名 URL** 等，并在待办中拆出独立里程碑（本清单不展开实现细节）。
+- [x] 若通过 Ably 或其它通道广播 `admin:downloads`（`internal/download/service.go` 中的 `UpdatesChannel`），删除相关发布与文档说明。
 
 ### 2. 数据层与模型
 
-- [ ] 从 `internal/store` 接口与 **Postgres / SQLite / 内存测试 store** 中移除 `DownloadTaskStore` 及 `DownloadTask` 的 CRUD；更新 `internal/api/test_stores_test.go` 等测试桩。
-- [ ] 数据库：新增迁移 **删除 `download_tasks` 表**（或保留表但废弃，二选一；推荐新迁移 `DROP TABLE` 并更新 `migrations` 与 `internal/store/postgres/schema.sql`、`internal/store/sqlite/schema.sql` 保持一致）。
-- [ ] `internal/model/model.go`：移除 `DownloadTask` / `DownloadTaskStatus`（若已无引用）。
+- [x] 从 `internal/store` 接口与 **Postgres / SQLite / 内存测试 store** 中移除 `DownloadTaskStore` 及 `DownloadTask` 的 CRUD；更新 `internal/api/test_stores_test.go` 等测试桩。
+- [x] 数据库：新增迁移 **删除 `download_tasks` 表**（或保留表但废弃，二选一；推荐新迁移 `DROP TABLE` 并更新 `migrations` 与 `internal/store/postgres/schema.sql`、`internal/store/sqlite/schema.sql` 保持一致）。
+- [x] `internal/model/model.go`：移除 `DownloadTask` / `DownloadTaskStatus`（若已无引用）。
 
 ### 3. Capabilities 与 `pkg/*` 工具探测
 
-- [ ] `internal/capabilities/capabilities.go`：移除对 `pkg/ffmpeg`、`pkg/ytdlp`、`pkg/aria2` 的探测；删除或收窄 `Report` / `Features` / `ToolReport` 中与 **HLS 下载、yt-dlp 导入、磁力 aria2、海报生成、metadata** 等仅服务于「本地下载/转码」的字段（**注意：这是 API 契约变更**，需在 README 中写明，并通知客户端做兼容或同步发版）。
-- [ ] 删除或合并不再使用的包：`pkg/ffmpeg`、`pkg/ytdlp`、`pkg/aria2`（若全仓库无其它引用）。
-- [ ] 全局搜索 `ffmpeg`、`yt-dlp`、`ytdlp`、`aria2` 字符串，清理残留 import 与注释。
+- [x] `internal/capabilities/capabilities.go`：移除对 `pkg/ffmpeg`、`pkg/ytdlp`、`pkg/aria2` 的探测；删除或收窄 `Report` / `Features` / `ToolReport` 中与 **HLS 下载、yt-dlp 导入、磁力 aria2、海报生成、metadata** 等仅服务于「本地下载/转码」的字段（**注意：这是 API 契约变更**，需在 README 中写明，并通知客户端做兼容或同步发版）。
+- [x] 删除或合并不再使用的包：`pkg/ffmpeg`、`pkg/ytdlp`、`pkg/aria2`（若全仓库无其它引用）。
+- [x] 全局搜索 `ffmpeg`、`yt-dlp`、`ytdlp`、`aria2` 字符串，清理残留 import 与注释。
 
 ### 4. 配置、环境与镜像
 
-- [ ] `internal/config/config.go`、`config.yaml`、`.env.example`：移除 `download_workers`、`aria2_rpc_url`、`aria2_secret` 等仅服务下载的配置项及 env 映射。
-- [ ] `docker-compose.yml` / `docker-compose.dev.yml`：删除 `DOWNLOAD_WORKERS` 等与下载相关的环境变量块。
-- [ ] `Dockerfile`：移除 `apt-get install ffmpeg`、安装 `yt-dlp` 的步骤（以及仅为下载服务的依赖）。
-- [ ] `.github/workflows/ci.yml`：移除 CI 中安装 `ffmpeg`、`yt-dlp` 的步骤（若移除下载后仍有测试依赖本地文件探测，再按需最小化保留或改为 mock）。
+- [x] `internal/config/config.go`、`config.yaml`、`.env.example`：移除 `download_workers`、`aria2_rpc_url`、`aria2_secret` 等仅服务下载的配置项及 env 映射。
+- [x] `docker-compose.yml` / `docker-compose.dev.yml`：删除 `DOWNLOAD_WORKERS` 等与下载相关的环境变量块。
+- [x] `Dockerfile`：移除 `apt-get install ffmpeg`、安装 `yt-dlp` 的步骤（以及仅为下载服务的依赖）。
+- [x] `.github/workflows/ci.yml`：移除 CI 中安装 `ffmpeg`、`yt-dlp` 的步骤（若移除下载后仍有测试依赖本地文件探测，再按需最小化保留或改为 mock）。
 
 ### 5. 文档与测试
 
-- [ ] `README.md`：更新「核心接口」与目录说明，去掉「下载任务」、静态文件服务中与「本地下载入库」矛盾的表述；补充 **Vercel 限制**（无长驻进程、无大磁盘、不适合 aria2/ffmpeg 拉流落盘）。
-- [ ] `Notes.md`（若存在相关说明）同步更新。
-- [ ] 修复或删除 `internal/api/router_test.go` 中与下载流程强绑定的用例（如 `TestCapabilitiesDownloadsAndVideosFlow`）；`internal/store/testutil/store_suite.go` 中与 `download_tasks` 相关的子测试。
-- [ ] `internal/config/config_test.go`：去掉对已删除配置项的断言（若有）。
+- [x] `README.md`：更新「核心接口」与目录说明，去掉「下载任务」、静态文件服务中与「本地下载入库」矛盾的表述；补充 **Vercel 限制**（无长驻进程、无大磁盘、不适合 aria2/ffmpeg 拉流落盘）。
+- [x] `Notes.md`（若存在相关说明）同步更新。
+- [x] 修复或删除 `internal/api/router_test.go` 中与下载流程强绑定的用例（如 `TestCapabilitiesDownloadsAndVideosFlow`）；`internal/store/testutil/store_suite.go` 中与 `download_tasks` 相关的子测试。
+- [x] `internal/config/config_test.go`：去掉对已删除配置项的断言（若有）。
 
 ---
 

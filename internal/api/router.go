@@ -13,7 +13,6 @@ import (
 	"watchtogether/internal/cache"
 	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
-	"watchtogether/internal/download"
 	"watchtogether/internal/email"
 	"watchtogether/internal/emailcode"
 	"watchtogether/internal/realtime"
@@ -24,21 +23,19 @@ import (
 )
 
 type Dependencies struct {
-	Config            config.Config
-	UserStore         store.UserStore
-	RoomStore         store.RoomStore
-	VideoStore        store.VideoStore
-	DownloadTaskStore store.DownloadTaskStore
-	EmailSender       email.SenderAPI
-	EmailCodes        *emailcode.Store
-	SessionCache      cache.SessionCache
-	RoomStateCache    cache.RoomStateCache
-	RoomPresence      cache.RoomPresence
-	RoomAccess        cache.RoomAccessCache
-	PubSub            cache.PubSub
-	Realtime          realtime.Service
-	Capabilities      capabilities.Report
-	DownloadService   *download.Service
+	Config         config.Config
+	UserStore      store.UserStore
+	RoomStore      store.RoomStore
+	VideoStore     store.VideoStore
+	EmailSender    email.SenderAPI
+	EmailCodes     *emailcode.Store
+	SessionCache   cache.SessionCache
+	RoomStateCache cache.RoomStateCache
+	RoomPresence   cache.RoomPresence
+	RoomAccess     cache.RoomAccessCache
+	PubSub         cache.PubSub
+	Realtime       realtime.Service
+	Capabilities   capabilities.Report
 }
 
 func NewRouter(deps Dependencies) *gin.Engine {
@@ -77,7 +74,6 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	registerAuthRoutes(router, deps, authService)
 	registerAdminRoomRoutes(router, deps, authService, rooms)
 	registerRoomRoutes(router, deps, authService, rooms)
-	registerDownloadRoutes(router, deps, authService)
 	registerVideoRoutes(router, deps, authService)
 	registerDebugRoutes(router, deps, authService, rooms)
 
