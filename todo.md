@@ -10,7 +10,10 @@
 - 显示名不唯一；不要把显示名用于登录唯一性判断。
 - 登录允许使用邮箱或用户名 + 密码。
 - 后端通过 `RESEND_API_KEY` 调用 Resend 发送邮件。
+- 邮件发送域名为 `verify.bestlkl.top`，sender 为 `login@verify.bestlkl.top`。
+- 邮箱验证码为 6 位，有效期 10 分钟，同一邮箱/用途 1 分钟只能发送 1 次，每日限制 5 次。
 - Ably 鉴权不再返回 Ably TokenDetails，而是由后端签发 Ably JWT 给客户端。
+- Ably JWT 接口返回 JSON：`{ "token": "<jwt>", "expires_at": "..." }`。
 
 ## 服务端待办
 
@@ -19,7 +22,8 @@
 - [ ] 增加邮件发送模块，建议放在 `internal/email` 或类似目录。
   - [ ] 使用 Resend Go SDK：`github.com/resend/resend-go/v3`。
   - [ ] 从环境变量读取 `RESEND_API_KEY`，不要写入配置文件默认值，不要暴露给前端。
-  - [ ] 增加邮件发件人配置，例如 `RESEND_FROM` / `EMAIL_FROM`，生产环境必须使用已验证域名邮箱。
+  - [ ] 使用已确认发送身份：域名 `verify.bestlkl.top`，sender `login@verify.bestlkl.top`。
+  - [ ] 增加邮件发件人配置，例如 `RESEND_FROM` / `EMAIL_FROM`，默认示例为 `WatchTogether <login@verify.bestlkl.top>`。
   - [ ] 明确本地开发策略：未配置 `RESEND_API_KEY` 时是启动失败、禁用邮件功能，还是使用日志输出 mock sender。
 - [ ] 按 Resend 文档封装发送接口。
   - [ ] 创建 Resend client：`resend.NewClient(apiKey)`。
@@ -28,7 +32,7 @@
   - [ ] 发送找回密码验证码邮件。
   - [ ] 记录 Resend 返回的 email id，便于排查投递问题；不要记录验证码明文。
 - [ ] 邮件模板与安全。
-  - [ ] 验证码邮件包含验证码、过期时间、用途说明。
+  - [ ] 验证码邮件包含 6 位验证码、10 分钟过期时间、用途说明。
   - [ ] 邮件 HTML 做基础样式即可；同时考虑纯文本 fallback。
   - [ ] 邮件内容不要包含 access token、refresh token、密码或其它敏感信息。
 
@@ -37,13 +41,15 @@
 - [ ] 扩展 `internal/config/config.go`。
   - [ ] 新增 `ResendAPIKey`，从 `RESEND_API_KEY` 读取。
   - [ ] 新增 `EmailFrom`，从 `EMAIL_FROM` 或 `RESEND_FROM` 读取。
-  - [ ] 新增验证码 TTL，例如 `EMAIL_CODE_TTL=10m`。
-  - [ ] 新增验证码发送冷却时间，例如 `EMAIL_CODE_SEND_INTERVAL=60s`。
+  - [ ] 新增验证码 TTL：`EMAIL_CODE_TTL=10m`。
+  - [ ] 新增验证码长度：`EMAIL_CODE_LENGTH=6`。
+  - [ ] 新增验证码发送冷却时间：`EMAIL_CODE_SEND_INTERVAL=60s`。
+  - [ ] 新增每日发送限制：`EMAIL_CODE_DAILY_LIMIT=5`。
   - [ ] 新增验证码尝试次数上限，例如 `EMAIL_CODE_MAX_ATTEMPTS=5`。
 - [ ] 更新 `.env.example`。
   - [ ] 增加 `RESEND_API_KEY=`。
-  - [ ] 增加 `EMAIL_FROM=WatchTogether <no-reply@your-domain.example>`。
-  - [ ] 增加验证码 TTL、冷却时间、尝试次数示例值。
+  - [ ] 增加 `EMAIL_FROM=WatchTogether <login@verify.bestlkl.top>`。
+  - [ ] 增加验证码长度、TTL、冷却时间、每日限制、尝试次数示例值。
 - [ ] 更新 `config.yaml` 示例。
   - [ ] 可只保留非敏感项；敏感 key 推荐只使用环境变量。
 
@@ -58,7 +64,7 @@
   - [ ] `users.username`：继续唯一。
   - [ ] `users.id`：继续主键，保持唯一。
   - [ ] `users.nickname`：保持非唯一，不添加唯一索引。
-  - [ ] 如已有线上用户，需要设计回填/迁移策略；没有邮箱的旧用户不能被破坏性迁移直接锁死。
+  - [ ] 旧用户迁移策略：当前没有真实用户，直接忽略旧用户兼容，迁移可破坏性地要求新 schema 必须包含邮箱。
 - [ ] 扩展 `store.UserStore`。
   - [ ] 增加 `GetByEmail(ctx, email)`。
   - [ ] 增加 `GetByLogin(ctx, login)` 或在 auth service 内判断邮箱/用户名后分别查询。
@@ -68,7 +74,10 @@
   - [ ] 可选方案 A：Postgres 表 `email_verification_codes`，字段包含 `id`、`email`、`purpose`、`code_hash`、`expires_at`、`consumed_at`、`attempts`、`created_at`、`updated_at`。
   - [ ] 可选方案 B：Redis 存储验证码 hash + attempts + cooldown，适合短生命周期验证码。
   - [ ] 不存储验证码明文；用 HMAC 或 bcrypt/argon2 hash 存储。
+  - [ ] 验证码生成 6 位数字码。
   - [ ] `purpose` 至少区分 `register` 和 `reset_password`。
+  - [ ] `expires_at` 固定按 10 分钟有效期计算。
+  - [ ] 同一邮箱 + purpose 发送冷却 1 分钟，每日发送上限 5 次。
   - [ ] 验证成功后立即标记 consumed 或删除。
 
 ### 4. 注册流程重做
@@ -76,7 +85,7 @@
 - [ ] 重新定义注册 API。
   - [ ] 建议新增 `POST /api/auth/register/code`：请求注册验证码。
     - 请求：`email`。
-    - 行为：邮箱规范化、检查邮箱未注册、生成验证码、发送邮件、设置冷却时间。
+    - 行为：邮箱规范化、检查邮箱未注册、生成 6 位验证码、发送邮件、设置 1 分钟冷却时间与每日 5 次限制。
     - 响应：不返回验证码，返回 `expires_at` / `retry_after`。
   - [ ] 调整 `POST /api/auth/register`：提交注册信息并校验验证码。
     - 请求：`email`、`username`、`password`、`code`、`nickname/display_name`、`avatar_url`。
@@ -89,18 +98,19 @@
 - [ ] 防滥用。
   - [ ] 对发送验证码接口增加 IP + email 维度限流。
   - [ ] 对验证码校验增加尝试次数上限。
+  - [ ] 同一邮箱注册验证码每日最多发送 5 次。
   - [ ] 不通过错误文案泄露某个邮箱是否已注册，除非产品明确需要。
 
 ### 5. 邮箱/用户名登录
 
 - [ ] 调整 `auth.Service.Login`。
-  - [ ] 参数从 `username` 语义改为 `login` 或 `identifier`。
+  - [ ] 参数从 `username` 语义改为 `login`。
   - [ ] 若输入像邮箱，则按 email 查询；否则按 username 查询。
   - [ ] 对用户名和邮箱都做规范化后查询。
   - [ ] 错误统一返回 `invalid username/email or password`，避免账号枚举。
 - [ ] 调整 `internal/api/auth_handlers.go`。
-  - [ ] 登录请求体兼容或迁移为 `{ "login": "...", "password": "..." }`。
-  - [ ] 若为了兼容旧客户端，可短期接受 `username` 字段作为 login。
+  - [ ] 登录请求体使用 `{ "login": "...", "password": "..." }`。
+  - [ ] 不保留旧的无邮箱注册或只传 `username` 登录路径；客户端需要同步改造。
   - [ ] 注册请求体增加 `email` 与 `code`。
 - [ ] 更新 JWT claims。
   - [ ] 当前系统 access/refresh token 可继续包含 `uid`、`username`、`role`。
@@ -111,7 +121,8 @@
 - [ ] 新增请求重置密码验证码接口。
   - [ ] 建议 `POST /api/auth/password/reset/code`。
   - [ ] 请求：`email`。
-  - [ ] 行为：如果邮箱存在，发送验证码；如果不存在，也返回相同成功形态，避免账号枚举。
+  - [ ] 行为：如果邮箱存在，发送 6 位验证码；如果不存在，也返回相同成功形态，避免账号枚举。
+  - [ ] 同一邮箱找回密码验证码每日最多发送 5 次，发送间隔至少 1 分钟。
 - [ ] 新增重置密码接口。
   - [ ] 建议 `POST /api/auth/password/reset`。
   - [ ] 请求：`email`、`code`、`new_password`。
@@ -141,12 +152,13 @@
   - [ ] 能力范围不要包含 `publish`，除非未来确认客户端需要直接 publish。
 - [ ] 调整 API。
   - [ ] 当前 `POST /api/ably/token` 返回 Ably `TokenDetails` JSON。
-  - [ ] 建议改为返回纯文本 JWT，或 JSON：`{ "token": "<jwt>", "expires_at": "..." }`。
-  - [ ] 如果使用 Ably JS `authCallback`，最简单是让接口返回纯文本 JWT。
+  - [ ] 改为返回 JSON：`{ "token": "<jwt>", "expires_at": "..." }`。
+  - [ ] `expires_at` 使用客户端可直接解析的时间格式，建议 RFC3339 UTC 字符串。
   - [ ] `snapshot` 响应中的 `ably.token_endpoint` 可继续指向该端点，但文档应说明它返回 JWT。
 - [ ] 更新测试。
   - [ ] 验证 JWT header `kid` 与 `alg`。
   - [ ] 验证 claims 包含 `x-ably-capability`、`x-ably-clientId`、`iat`、`exp`。
+  - [ ] 验证响应 JSON 包含 `token` 与 `expires_at`，且不再包含 Ably TokenDetails 字段。
   - [ ] 验证私有房间密码/授权逻辑仍适用于 JWT 签发端点。
   - [ ] 验证 JWT 能力不包含 `publish`。
 
@@ -162,8 +174,8 @@
   - [ ] 登录失败统一文案。
   - [ ] 注册邮箱/用户名冲突文案。
 - [ ] 对旧客户端兼容做明确选择。
-  - [ ] 是否继续接受旧的 `username` 登录字段。
-  - [ ] 是否允许旧的无邮箱注册；如果不允许，需要客户端和部署同步发布。
+  - [ ] 不继续接受旧的 `username` 登录字段作为主协议字段；客户端统一迁移到 `login`。
+  - [ ] 不保留旧的无邮箱注册路径；客户端和服务端需要同步发布。
 
 ## 客户端待办（WatchTvTogether-Web）
 
@@ -172,33 +184,36 @@
 - [ ] 不在前端配置 `RESEND_API_KEY`、`ABLY_ROOT_KEY` 或任何邮件/Ably root secret。
 - [ ] 更新 API 类型定义。
   - [ ] 注册请求增加 `email`、`code`。
-  - [ ] 登录请求从 `username` 改为 `login` 或在 UI 上叫“邮箱/用户名”。
+  - [ ] 登录请求从 `username` 改为 `login`，UI 文案为“邮箱/用户名”。
   - [ ] 新增请求注册验证码接口。
   - [ ] 新增请求找回密码验证码接口。
   - [ ] 新增重置密码接口。
+  - [ ] Ably JWT 响应类型定义为 `{ token: string; expires_at: string }`。
 - [ ] 更新错误处理。
   - [ ] 处理验证码冷却倒计时。
   - [ ] 处理验证码过期/错误/尝试过多。
+  - [ ] 处理验证码每日发送上限 5 次的错误提示。
   - [ ] 处理邮箱或用户名已存在。
 
 ### 2. 登录/注册页面（AuthView）
 
 - [ ] 登录表单。
   - [ ] 输入框 label 改为“邮箱或用户名”。
-  - [ ] 请求体使用 `login`；如后端短期兼容旧字段，可保留兼容层但 UI 不再只叫用户名。
+  - [ ] 请求体必须使用 `login`，移除旧 `username` 登录字段调用。
   - [ ] 错误提示统一为“邮箱/用户名或密码错误”。
 - [ ] 注册表单。
   - [ ] 增加邮箱输入。
   - [ ] 增加“发送验证码”按钮。
   - [ ] 增加验证码输入。
   - [ ] 发送后展示倒计时，倒计时期间禁用重复发送。
+  - [ ] 展示或处理每日最多发送 5 次限制。
   - [ ] 提交注册时携带 `email`、`username`、`password`、`code`、`nickname/display_name`。
   - [ ] 显示名文案明确为可重复；用户名文案明确为唯一。
 - [ ] 表单校验。
   - [ ] 邮箱格式基础校验。
   - [ ] 用户名长度/字符规则与后端一致。
   - [ ] 密码长度与后端一致。
-  - [ ] 验证码长度与后端一致。
+  - [ ] 验证码长度固定为 6 位数字。
 
 ### 3. 找回密码页面/流程
 
@@ -209,7 +224,8 @@
   - [ ] 步骤 3：重置成功后引导回登录页。
 - [ ] 安全与体验。
   - [ ] 不提示“邮箱不存在”这类可枚举账号的文案。
-  - [ ] 支持重新发送验证码倒计时。
+  - [ ] 支持 1 分钟重新发送验证码倒计时。
+  - [ ] 处理每日最多发送 5 次限制。
   - [ ] 新密码提交成功后清空表单敏感内容。
 
 ### 4. 当前用户与展示名
@@ -227,8 +243,8 @@
 - [ ] 更新当前 Ably 初始化逻辑。
   - [ ] 仍从 `POST /api/rooms/:roomId/snapshot` 获取 `ably.channel` 与 `ably.token_endpoint`。
   - [ ] `authCallback` 请求后端 token endpoint 时，预期返回 Ably JWT。
-  - [ ] 如果后端返回纯文本 JWT：`callback(null, await response.text())`。
-  - [ ] 如果后端返回 JSON：解析 `token` 后传给 Ably。
+  - [ ] 后端返回 JSON：解析 `{ token, expires_at }` 后将 `token` 传给 Ably。
+  - [ ] 可在本地记录 `expires_at` 用于调试续签时机，但实际续签仍交给 Ably SDK 的 `authCallback`。
 - [ ] 保留现有私有房间逻辑。
   - [ ] token endpoint 仍需携带 `room_id`、`purpose=room`、必要时携带本次会话内存中的房间密码。
   - [ ] 认证失败时提示重新加入房间或重新输入私有房密码。
@@ -247,6 +263,7 @@
   - [ ] 错误验证码不能注册。
   - [ ] 过期验证码不能注册。
   - [ ] 同一邮箱重复发送受冷却限制。
+  - [ ] 同一邮箱每日发送超过 5 次会被拒绝。
   - [ ] 已注册邮箱不能再次注册。
 - [ ] 登录。
   - [ ] 用户名 + 密码可登录。
@@ -258,6 +275,7 @@
   - [ ] 重置密码后旧 refresh token 失效。
 - [ ] Ably JWT。
   - [ ] 公共房间可获取 JWT 并连接 Ably。
+  - [ ] `/api/ably/token` 返回 `{ token, expires_at }` JSON，客户端能解析并把 `token` 交给 Ably。
   - [ ] 私有房间未授权/密码错误不能获取 JWT。
   - [ ] 私有房间加入后可续签 JWT。
   - [ ] 客户端只能 subscribe/presence/history，不能直接 publish 控制消息。
@@ -265,10 +283,7 @@
 
 ## 不确定/需要进一步确认的文档与产品点
 
-- [ ] Resend 生产发件域名、发件人邮箱、是否需要品牌模板：当前仅确认 Go SDK 发送方式和 `RESEND_API_KEY`，还需确认实际 Resend domain 与 sender。
-- [ ] 邮箱验证码位数、有效期、发送频率、每日限制：需求未指定，需要产品/运营确认。
-- [ ] 旧用户迁移策略：当前用户表无 email；需要确认是否已有生产用户、如何补齐邮箱、是否允许临时无邮箱登录。
-- [ ] 登录请求字段命名：建议使用 `login`，但需要确认是否要求兼容旧客户端的 `username` 字段。
-- [ ] `/api/ably/token` 返回格式：Ably 文档示例 `authCallback` 可直接返回纯文本 JWT；如前端 API client 更偏好 JSON，需要确认采用纯文本还是 `{ token, expires_at }`。
+- [ ] Resend sender 显示名是否固定为 `WatchTogether`，还是只使用裸邮箱 `login@verify.bestlkl.top`。
+- [ ] 邮件品牌模板、Logo、文案语气是否需要单独设计；当前仅确认发送域名 `verify.bestlkl.top` 和 sender `login@verify.bestlkl.top`。
+- [ ] 验证码每日限制的统计口径：按邮箱 + purpose、按邮箱总量、按 IP，还是组合限制；当前按邮箱 + purpose 每日 5 次规划。
 - [ ] Ably JWT capability 细节：目前按房间控制频道 `subscribe/presence/history` 规划；如果未来客户端需要直接 publish 某些低风险事件，需要重新评估 capability。
-- [ ] 是否允许修改接口路径：本文建议新增验证码/找回密码接口；若需要严格保持旧路径，需要再定 API 兼容方案。
