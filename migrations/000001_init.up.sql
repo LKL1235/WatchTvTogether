@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
+    email TEXT NOT NULL DEFAULT '',
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     nickname TEXT NOT NULL DEFAULT '',
@@ -8,6 +9,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email)) WHERE email <> '';
 
 CREATE TABLE IF NOT EXISTS rooms (
     id TEXT PRIMARY KEY,

@@ -11,6 +11,7 @@ const (
 
 type User struct {
 	ID           string    `json:"id"`
+	Email        string    `json:"email"`
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"-"`
 	Nickname     string    `json:"nickname,omitempty"`
@@ -112,9 +113,9 @@ type RoomState struct {
 	// VideoDuration is the duration of the current video in seconds when known (for progress projection).
 	VideoDuration float64 `json:"video_duration,omitempty"`
 	// ControlVersion increases on each owner control/snapshot write so stale clients cannot overwrite newer state.
-	ControlVersion int64 `json:"control_version,omitempty"`
-	UpdatedBy      string         `json:"updated_by,omitempty"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ControlVersion int64     `json:"control_version,omitempty"`
+	UpdatedBy      string    `json:"updated_by,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at"`
 	// BaseUpdatedAt is the last persisted control timestamp before projection; set only in API snapshots for clients that need the authoritative wall time.
 	BaseUpdatedAt time.Time `json:"base_updated_at,omitempty"`
 }

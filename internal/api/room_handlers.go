@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -292,12 +293,15 @@ func (h *roomHandler) ablyToken(c *gin.Context) {
 		apierr.Abort(c, apierr.Forbidden("invalid room password"))
 		return
 	}
-	token, err := h.deps.Realtime.RequestRoomToken(c.Request.Context(), room.ID, currentClaims(c).UserID)
+	token, exp, err := h.deps.Realtime.IssueRoomJWT(c.Request.Context(), room.ID, currentClaims(c).UserID)
 	if err != nil {
 		apierr.Abort(c, apierr.Internal("failed to issue ably token"))
 		return
 	}
-	c.JSON(http.StatusOK, token)
+	c.JSON(http.StatusOK, gin.H{
+		"token":      token,
+		"expires_at": exp.UTC().Format(time.RFC3339),
+	})
 }
 
 func (h *roomHandler) control(c *gin.Context) {
@@ -320,12 +324,12 @@ func (h *roomHandler) control(c *gin.Context) {
 	}
 	user := roomUserFromClaims(currentUser(c), room)
 	msg, err := h.rooms.ApplyControl(c.Request.Context(), room.ID, user, roomhub.ControlInput{
-		Action:         req.Action,
-		Position:       req.Position,
-		VideoID:        strings.TrimSpace(req.VideoID),
-		Queue:          cleanQueue(req.Queue),
-		PlaybackMode:   req.PlaybackMode,
-		ClientVersion:  req.ControlVersion,
+		Action:        req.Action,
+		Position:      req.Position,
+		VideoID:       strings.TrimSpace(req.VideoID),
+		Queue:         cleanQueue(req.Queue),
+		PlaybackMode:  req.PlaybackMode,
+		ClientVersion: req.ControlVersion,
 	})
 	if err != nil {
 		if errors.Is(err, roomhub.ErrForbidden) {

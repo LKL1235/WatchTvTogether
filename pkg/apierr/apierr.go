@@ -15,6 +15,7 @@ const (
 	CodeForbidden      Code = "FORBIDDEN"
 	CodeNotFound       Code = "NOT_FOUND"
 	CodeConflict       Code = "CONFLICT"
+	CodeRateLimited    Code = "RATE_LIMITED"
 	CodeInternal       Code = "INTERNAL_ERROR"
 )
 
@@ -50,6 +51,10 @@ func NotFound(message string) *Error {
 
 func Conflict(message string) *Error {
 	return New(http.StatusConflict, CodeConflict, message)
+}
+
+func TooManyRequests(message string) *Error {
+	return New(http.StatusTooManyRequests, CodeRateLimited, message)
 }
 
 func Internal(message string) *Error {

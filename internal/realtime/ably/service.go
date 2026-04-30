@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	ablysdk "github.com/ably/ably-go/ably"
 
@@ -23,12 +24,10 @@ const (
 
 var ErrRootKeyRequired = errors.New("ably root key is required")
 
-type TokenDetails = ablysdk.TokenDetails
-
 type Publisher interface {
 	ChannelName(roomID string) string
 	RoomCapability(roomID string) (string, error)
-	RequestRoomToken(ctx context.Context, roomID, clientID string) (*ablysdk.TokenDetails, error)
+	IssueRoomJWT(ctx context.Context, roomID, clientID string) (token string, expiresAt time.Time, err error)
 	PublishRoomMessage(ctx context.Context, roomID, name string, data room.Message) error
 }
 
@@ -77,20 +76,9 @@ func RoomCapability(channel string) (string, error) {
 	return string(raw), nil
 }
 
-func (s *Service) RequestRoomToken(ctx context.Context, roomID, clientID string) (*ablysdk.TokenDetails, error) {
-	clientID = strings.TrimSpace(clientID)
-	if clientID == "" {
-		return nil, errors.New("client id is required")
-	}
-	capability, err := s.RoomCapability(roomID)
-	if err != nil {
-		return nil, err
-	}
-	return s.rest.Auth.RequestToken(ctx, &ablysdk.TokenParams{
-		ClientID:   clientID,
-		TTL:        s.cfg.AblyTokenTTL.Milliseconds(),
-		Capability: capability,
-	})
+func (s *Service) IssueRoomJWT(ctx context.Context, roomID, clientID string) (string, time.Time, error) {
+	_ = ctx
+	return IssueRoomJWT(s.cfg, roomID, clientID, time.Now())
 }
 
 func (s *Service) PublishRoomMessage(ctx context.Context, roomID, name string, data any) error {

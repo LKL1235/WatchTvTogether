@@ -11,6 +11,7 @@ import (
 
 	"watchtogether/internal/cache/memory"
 	"watchtogether/internal/config"
+	"watchtogether/internal/emailcode"
 	"watchtogether/internal/model"
 	"watchtogether/internal/store"
 )
@@ -42,6 +43,12 @@ func testDeps(stores *memoryStores) Dependencies {
 	cfg.JWTSecret = "test-secret"
 	cfg.JWTAccessTTL = time.Hour
 	cfg.JWTRefreshTTL = 24 * time.Hour
+	cfg.EmailCodeTTL = 10 * time.Minute
+	cfg.EmailCodeSendInterval = 60 * time.Second
+	cfg.EmailCodeDailyLimit = 5
+	cfg.EmailCodeMaxAttempts = 5
+	cfg.EmailCodeLength = 6
+	cfg.AblyJWTTTL = 30 * time.Minute
 	cfg.StorageDir = "."
 	cfg.PosterDir = "."
 	return Dependencies{
@@ -50,6 +57,8 @@ func testDeps(stores *memoryStores) Dependencies {
 		RoomStore:         memoryRoomStore{stores},
 		VideoStore:        memoryVideoStore{stores},
 		DownloadTaskStore: memoryDownloadTaskStore{stores},
+		EmailSender:       testHookEmailSender{},
+		EmailCodes:        emailcode.NewStore(nil),
 		SessionCache:      memory.NewSessionCache(),
 		RoomStateCache:    memory.NewRoomStateCache(),
 		RoomPresence:      memory.NewRoomPresence(),
@@ -69,11 +78,25 @@ func (s *memoryStores) GetByID(_ context.Context, id string) (*model.User, error
 	return &copyUser, nil
 }
 
+func (s *memoryStores) GetByEmail(_ context.Context, email string) (*model.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	want := strings.ToLower(strings.TrimSpace(email))
+	for _, user := range s.users {
+		if strings.ToLower(strings.TrimSpace(user.Email)) == want {
+			copyUser := *user
+			return &copyUser, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
 func (s *memoryStores) GetByUsername(_ context.Context, username string) (*model.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	want := strings.ToLower(strings.TrimSpace(username))
 	for _, user := range s.users {
-		if user.Username == username {
+		if strings.ToLower(user.Username) == want {
 			copyUser := *user
 			return &copyUser, nil
 		}
@@ -86,6 +109,9 @@ func (s *memoryStores) Create(_ context.Context, user *model.User) error {
 	defer s.mu.Unlock()
 	for _, existing := range s.users {
 		if existing.Username == user.Username {
+			return store.ErrConflict
+		}
+		if strings.TrimSpace(existing.Email) != "" && strings.EqualFold(existing.Email, user.Email) {
 			return store.ErrConflict
 		}
 	}
@@ -433,4 +459,13 @@ func (s memoryDownloadTaskStore) UpdateResult(ctx context.Context, task *model.D
 
 func (s memoryDownloadTaskStore) Delete(ctx context.Context, id string) error {
 	return s.DeleteDownloadTask(ctx, id)
+}
+
+// testHookEmailSender pretends email is enabled so register/reset code paths can run in tests without Resend.
+type testHookEmailSender struct{}
+
+func (testHookEmailSender) Enabled() bool { return true }
+
+func (testHookEmailSender) SendVerificationCode(_ context.Context, _, _, _ string) (string, error) {
+	return "test-email-id", nil
 }

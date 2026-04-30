@@ -35,18 +35,21 @@ docker compose up -d --build
 ## 核心接口
 
 - `GET /healthz`
-- `POST /api/auth/register`
-- `POST /api/auth/login`
+- `POST /api/auth/register/code`（发送注册邮箱验证码）
+- `POST /api/auth/register`（`email`、`username`、`password`、`code`、可选 `nickname`/`avatar_url`）
+- `POST /api/auth/password/reset/code`
+- `POST /api/auth/password/reset`（`email`、`code`、`new_password`，成功后使 refresh token 失效）
+- `POST /api/auth/login`（请求体：`login` 为邮箱或用户名，`password`）
 - `POST /api/auth/refresh`
 - `POST /api/auth/logout`
-- `GET /api/users/me`
+- `GET /api/users/me`（含 `email`）
 - `POST /api/rooms`
 - `GET /api/rooms`
 - `GET /api/rooms/:roomId`
 - `POST /api/rooms/:roomId/join`
 - `POST /api/rooms/:roomId/snapshot`
 - `POST /api/rooms/:roomId/control`
-- `POST /api/ably/token`
+- `POST /api/ably/token`（返回 Ably 用 JWT：`token`、`expires_at` RFC3339）
 - `GET /api/rooms/:roomId/state`
 - `POST /api/rooms/:roomId/kick/:uid`
 - `DELETE /api/rooms/:roomId`
@@ -54,6 +57,11 @@ docker compose up -d --build
 - `GET /api/videos/:id`
 - `GET /static/videos/*`
 - `GET /static/posters/*`
+
+### 错误码补充
+
+- `RATE_LIMITED`（HTTP 429）：验证码发送过频、每日上限、IP 限流等；部分响应带 `Retry-After` 头（秒）。
+- 验证码相关文案见 API 错误 `message`（过期、错误、尝试过多等）。
 
 ## CI/CD
 
@@ -66,6 +74,6 @@ docker compose up -d --build
 - `internal/api` 路由与 handler
 - `internal/store` 存储抽象与实现（postgres）
 - `internal/cache` 缓存抽象与实现（memory/redis）
-- `internal/realtime` Ably token 与房间消息发布
+- `internal/realtime` Ably JWT（客户端）与房间消息发布（REST）
 - `internal/download` 下载任务
 - `pkg` 通用工具
