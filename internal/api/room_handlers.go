@@ -43,10 +43,12 @@ type ablyTokenRequest struct {
 }
 
 type controlRoomRequest struct {
-	Action   model.PlaybackAction `json:"action"`
-	Position float64              `json:"position"`
-	VideoID  string               `json:"video_id"`
-	Queue    []string             `json:"queue"`
+	Action         model.PlaybackAction `json:"action"`
+	Position       float64              `json:"position"`
+	VideoID        string               `json:"video_id"`
+	Queue          []string             `json:"queue"`
+	PlaybackMode   model.PlaybackMode   `json:"playback_mode"`
+	ControlVersion int64                `json:"control_version"`
 }
 
 type roomSnapshotRequest struct {
@@ -80,6 +82,7 @@ func registerRoomRoutes(router *gin.Engine, deps Dependencies, authService *auth
 	api.GET("/rooms/:roomId", h.get)
 	api.DELETE("/rooms/:roomId", h.delete)
 	api.POST("/rooms/:roomId/join", h.join)
+	api.POST("/rooms/:roomId/leave", h.leave)
 	api.POST("/rooms/:roomId/kick/:uid", h.kick)
 	api.GET("/rooms/:roomId/state", h.state)
 	api.POST("/rooms/:roomId/control", h.control)
@@ -136,6 +139,9 @@ func (h *roomHandler) list(c *gin.Context) {
 		respondStoreError(c, err)
 		return
 	}
+	for _, r := range rooms {
+		h.rooms.EnrichRoomFromCache(c.Request.Context(), r)
+	}
 	c.JSON(http.StatusOK, roomListResponse{Items: rooms, Total: total})
 }
 
@@ -144,6 +150,7 @@ func (h *roomHandler) get(c *gin.Context) {
 	if !ok {
 		return
 	}
+	h.rooms.EnrichRoomFromCache(c.Request.Context(), room)
 	user := currentUser(c)
 	c.JSON(http.StatusOK, roomResponse{Room: room, IsOwner: user != nil && room.OwnerID == user.UserID})
 }
@@ -162,7 +169,7 @@ func (h *roomHandler) delete(c *gin.Context) {
 		return
 	}
 	user := roomUserFromClaims(currentUser(c), room)
-	if err := h.rooms.Destroy(c.Request.Context(), room.ID, &user); err != nil {
+	if err := h.rooms.CloseRoom(c.Request.Context(), room.ID, &user); err != nil {
 		respondStoreError(c, err)
 		return
 	}
@@ -186,7 +193,33 @@ func (h *roomHandler) join(c *gin.Context) {
 		}
 	}
 	user := currentUser(c)
+	u := roomUserFromClaims(user, room)
+	if _, err := h.rooms.Join(c.Request.Context(), room.ID, u); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			apierr.Abort(c, apierr.Conflict("already in another room; leave that room first"))
+			return
+		}
+		respondStoreError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, roomResponse{Room: room, IsOwner: user != nil && room.OwnerID == user.UserID})
+}
+
+func (h *roomHandler) leave(c *gin.Context) {
+	room, ok := h.loadRoom(c)
+	if !ok {
+		return
+	}
+	user := currentUser(c)
+	if user == nil {
+		apierr.Abort(c, apierr.Unauthorized("authentication required"))
+		return
+	}
+	if err := h.rooms.Leave(c.Request.Context(), room.ID, user.UserID); err != nil {
+		respondStoreError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *roomHandler) kick(c *gin.Context) {
@@ -202,8 +235,9 @@ func (h *roomHandler) kick(c *gin.Context) {
 		apierr.Abort(c, apierr.InvalidRequest("user id is required"))
 		return
 	}
-	target := &roomhub.User{ID: strings.TrimSpace(c.Param("uid"))}
-	if err := h.rooms.PublishRoomEvent(c.Request.Context(), room.ID, "user_kicked", target); err != nil {
+	uid := strings.TrimSpace(c.Param("uid"))
+	actor := roomUserFromClaims(currentUser(c), room)
+	if err := h.rooms.KickMember(c.Request.Context(), room.ID, uid, &actor); err != nil {
 		respondStoreError(c, err)
 		return
 	}
@@ -215,7 +249,7 @@ func (h *roomHandler) state(c *gin.Context) {
 	if !ok {
 		return
 	}
-	state, err := h.deps.RoomStateCache.GetRoomState(c.Request.Context(), room.ID)
+	state, err := h.rooms.ProjectedRoomState(c.Request.Context(), room.ID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			c.JSON(http.StatusOK, gin.H{"room_id": room.ID, "action": model.PlaybackActionPause, "position": 0})
@@ -282,15 +316,21 @@ func (h *roomHandler) control(c *gin.Context) {
 		return
 	}
 	user := roomUserFromClaims(currentUser(c), room)
-	msg, err := h.rooms.ApplyControl(c.Request.Context(), room.ID, user, roomhub.Message{
-		Action:   req.Action,
-		Position: req.Position,
-		VideoID:  strings.TrimSpace(req.VideoID),
-		Queue:    cleanQueue(req.Queue),
+	msg, err := h.rooms.ApplyControl(c.Request.Context(), room.ID, user, roomhub.ControlInput{
+		Action:         req.Action,
+		Position:       req.Position,
+		VideoID:        strings.TrimSpace(req.VideoID),
+		Queue:          cleanQueue(req.Queue),
+		PlaybackMode:   req.PlaybackMode,
+		ClientVersion:  req.ControlVersion,
 	})
 	if err != nil {
 		if errors.Is(err, roomhub.ErrForbidden) {
 			apierr.Abort(c, apierr.Forbidden("room owner or admin required"))
+			return
+		}
+		if errors.Is(err, roomhub.ErrStaleControl) {
+			apierr.Abort(c, apierr.Conflict("stale control version"))
 			return
 		}
 		respondStoreError(c, err)

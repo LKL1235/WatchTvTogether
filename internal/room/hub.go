@@ -3,13 +3,18 @@ package room
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"watchtogether/internal/cache"
 	"watchtogether/internal/model"
+	"watchtogether/internal/store"
 )
 
 var ErrForbidden = errors.New("forbidden")
+
+// ErrStaleControl is returned when client control_version is older than server state.
+var ErrStaleControl = errors.New("stale control version")
 
 type User struct {
 	ID       string         `json:"id"`
@@ -43,47 +48,195 @@ type Publisher interface {
 
 type Service struct {
 	states    cache.RoomStateCache
+	presence  cache.RoomPresence
+	rooms     store.RoomStore
+	videos    store.VideoStore
 	publisher Publisher
 	now       func() time.Time
 }
 
-func NewService(states cache.RoomStateCache, publisher Publisher) *Service {
-	return &Service{states: states, publisher: publisher, now: time.Now}
+func NewService(states cache.RoomStateCache, presence cache.RoomPresence, rooms store.RoomStore, videos store.VideoStore, publisher Publisher) *Service {
+	return &Service{
+		states:    states,
+		presence:  presence,
+		rooms:     rooms,
+		videos:    videos,
+		publisher: publisher,
+		now:       time.Now,
+	}
 }
 
+func (s *Service) memberCount(ctx context.Context, roomID string) int {
+	if s.presence == nil {
+		return 0
+	}
+	n, err := s.presence.MemberCount(ctx, roomID)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// Snapshot returns playback snapshot with projected position for play state.
 func (s *Service) Snapshot(ctx context.Context, roomID string) Snapshot {
-	snapshot := Snapshot{
+	state, _ := s.ProjectedRoomState(ctx, roomID)
+	snap := Snapshot{
 		RoomID:      roomID,
 		Queue:       []string{},
-		ViewerCount: 0,
+		ViewerCount: s.memberCount(ctx, roomID),
 	}
-	if state, err := s.states.GetRoomState(ctx, roomID); err == nil {
-		snapshot.State = state
-		snapshot.Queue = append(snapshot.Queue, state.Queue...)
-		if len(snapshot.Queue) == 0 && state.VideoID != "" {
-			snapshot.Queue = []string{state.VideoID}
+	if state != nil {
+		snap.State = state
+		snap.Queue = append(snap.Queue, state.Queue...)
+		if len(snap.Queue) == 0 && state.VideoID != "" {
+			snap.Queue = []string{state.VideoID}
 		}
 	}
-	return snapshot
+	return snap
 }
 
-func (s *Service) ApplyControl(ctx context.Context, roomID string, user User, msg Message) (Message, error) {
+// ProjectedRoomState loads Redis state and applies time-based progress projection when playing.
+func (s *Service) ProjectedRoomState(ctx context.Context, roomID string) (*model.RoomState, error) {
+	state, err := s.states.GetRoomState(ctx, roomID)
+	if err != nil {
+		return nil, err
+	}
+	return s.projectState(ctx, state), nil
+}
+
+func (s *Service) projectState(ctx context.Context, base *model.RoomState) *model.RoomState {
+	if base == nil {
+		return nil
+	}
+	out := *base
+	duration := base.VideoDuration
+	if duration <= 0 && base.VideoID != "" && s.videos != nil {
+		if v, err := s.videos.GetByID(ctx, base.VideoID); err == nil && v != nil {
+			duration = v.Duration
+			out.VideoDuration = duration
+		}
+	}
+	now := s.now().UTC()
+	pos, atEnd := ProjectedPlayback(&out, now, duration)
+	out.Position = pos
+	out.UpdatedAt = now
+	if atEnd && duration > 0 {
+		mode := out.PlaybackMode
+		if mode == "" {
+			mode = model.PlaybackModeSequential
+		}
+		if nextID, ok := NextVideoAfterEnd(base.VideoID, out.Queue, mode); ok {
+			out.VideoID = nextID
+			out.Position = 0
+			out.Action = model.PlaybackActionPause
+			if s.videos != nil && nextID != "" {
+				if v, err := s.videos.GetByID(ctx, nextID); err == nil && v != nil {
+					out.VideoDuration = v.Duration
+				}
+			}
+		} else {
+			out.Action = model.PlaybackActionPause
+			out.Position = duration
+		}
+	}
+	return &out
+}
+
+// Join adds the user to room presence; returns previous room id if the user was moved.
+func (s *Service) Join(ctx context.Context, roomID string, user User) (previousRoomID string, err error) {
+	if s.presence == nil {
+		return "", nil
+	}
+	return s.presence.JoinRoom(ctx, roomID, user.ID, user.Username)
+}
+
+// Leave removes the user from room presence.
+func (s *Service) Leave(ctx context.Context, roomID string, userID string) error {
+	if s.presence == nil {
+		return nil
+	}
+	return s.presence.LeaveRoom(ctx, roomID, userID)
+}
+
+type ControlInput struct {
+	Action        model.PlaybackAction
+	Position      float64
+	VideoID       string
+	Queue         []string
+	PlaybackMode  model.PlaybackMode
+	ClientVersion int64
+}
+
+func (s *Service) ApplyControl(ctx context.Context, roomID string, user User, msg ControlInput) (Message, error) {
 	if user.Role != model.UserRoleAdmin && !user.IsOwner {
 		return Message{}, ErrForbidden
 	}
 	now := s.now().UTC()
-	queue := append([]string(nil), msg.Queue...)
-	if len(queue) == 0 && msg.VideoID != "" {
-		queue = []string{msg.VideoID}
+	prev, err := s.states.GetRoomState(ctx, roomID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return Message{}, err
 	}
+	if prev != nil && msg.ClientVersion > 0 && msg.ClientVersion < prev.ControlVersion {
+		return Message{}, ErrStaleControl
+	}
+
+	queue := append([]string(nil), msg.Queue...)
+	videoID := strings.TrimSpace(msg.VideoID)
+	mode := model.PlaybackModeSequential
+	if prev != nil && prev.PlaybackMode != "" {
+		mode = prev.PlaybackMode
+	}
+	if msg.PlaybackMode == model.PlaybackModeSequential || msg.PlaybackMode == model.PlaybackModeLoop {
+		mode = msg.PlaybackMode
+	}
+
+	switch msg.Action {
+	case model.PlaybackActionNext:
+		baseVID := videoID
+		if baseVID == "" && prev != nil {
+			baseVID = prev.VideoID
+		}
+		if len(queue) == 0 && prev != nil {
+			queue = append(queue, prev.Queue...)
+		}
+		if nextID, ok := nextInQueue(baseVID, queue, mode); ok {
+			videoID = nextID
+			msg.Position = 0
+			msg.Action = model.PlaybackActionPause
+		}
+	case model.PlaybackActionSwitch:
+		if videoID == "" && len(queue) > 0 {
+			videoID = queue[0]
+		}
+	}
+
+	if len(queue) == 0 && videoID != "" {
+		queue = []string{videoID}
+	}
+
+	cv := int64(1)
+	if prev != nil {
+		cv = prev.ControlVersion + 1
+	}
+
+	duration := 0.0
+	if videoID != "" && s.videos != nil {
+		if v, err := s.videos.GetByID(ctx, videoID); err == nil && v != nil {
+			duration = v.Duration
+		}
+	}
+
 	state := &model.RoomState{
-		RoomID:    roomID,
-		VideoID:   msg.VideoID,
-		Queue:     queue,
-		Action:    msg.Action,
-		Position:  msg.Position,
-		UpdatedBy: user.ID,
-		UpdatedAt: now,
+		RoomID:         roomID,
+		VideoID:        videoID,
+		Queue:          queue,
+		Action:         msg.Action,
+		Position:       msg.Position,
+		PlaybackMode:   mode,
+		VideoDuration:  duration,
+		ControlVersion: cv,
+		UpdatedBy:      user.ID,
+		UpdatedAt:      now,
 	}
 	if err := s.states.SetRoomState(ctx, roomID, state); err != nil {
 		return Message{}, err
@@ -92,7 +245,7 @@ func (s *Service) ApplyControl(ctx context.Context, roomID string, user User, ms
 		Type:      "sync",
 		Action:    msg.Action,
 		Position:  msg.Position,
-		VideoID:   msg.VideoID,
+		VideoID:   videoID,
 		Queue:     queue,
 		Timestamp: now.Unix(),
 		User:      &user,
@@ -103,11 +256,43 @@ func (s *Service) ApplyControl(ctx context.Context, roomID string, user User, ms
 	return sync, nil
 }
 
+func nextInQueue(current string, queue []string, mode model.PlaybackMode) (string, bool) {
+	if len(queue) == 0 {
+		return "", false
+	}
+	idx := indexOf(queue, current)
+	if idx < 0 {
+		return queue[0], true
+	}
+	switch mode {
+	case model.PlaybackModeLoop:
+		next := idx + 1
+		if next >= len(queue) {
+			next = 0
+		}
+		return queue[next], true
+	default:
+		if idx+1 >= len(queue) {
+			return "", false
+		}
+		return queue[idx+1], true
+	}
+}
+
+// Destroy removes cached room state and presence and notifies clients.
 func (s *Service) Destroy(ctx context.Context, roomID string, user *User) error {
+	return s.CloseRoom(ctx, roomID, user)
+}
+
+// CloseRoom deletes Redis room state, presence, and notifies Ably.
+func (s *Service) CloseRoom(ctx context.Context, roomID string, user *User) error {
 	if err := s.states.DeleteRoomState(ctx, roomID); err != nil {
 		return err
 	}
-	return s.PublishRoomEvent(ctx, roomID, "room_deleted", user)
+	if s.presence != nil {
+		_ = s.presence.DeleteRoomPresence(ctx, roomID)
+	}
+	return s.PublishRoomEvent(ctx, roomID, "room_closed", user)
 }
 
 func (s *Service) PublishRoomEvent(ctx context.Context, roomID string, event string, user *User) error {
@@ -120,4 +305,93 @@ func (s *Service) PublishRoomEvent(ctx context.Context, roomID string, event str
 		User:  user,
 	}
 	return s.publisher.PublishRoomMessage(ctx, roomID, "room.event", msg)
+}
+
+func (s *Service) KickMember(ctx context.Context, roomID string, targetUserID string, actor *User) error {
+	if s.presence != nil {
+		if err := s.presence.RemoveMember(ctx, roomID, targetUserID); err != nil {
+			return err
+		}
+	}
+	target := &User{ID: targetUserID}
+	return s.PublishRoomEvent(ctx, roomID, "user_kicked", target)
+}
+
+const loginCleanupInterval = 5 * time.Minute
+
+// MaybeRunGlobalCleanup runs empty-room cleanup when last run was long enough ago and lock acquired.
+func (s *Service) MaybeRunGlobalCleanup(ctx context.Context) error {
+	if s.presence == nil || s.rooms == nil {
+		return nil
+	}
+	last, err := s.presence.GetLastRoomCleanupAt(ctx)
+	if err != nil {
+		return err
+	}
+	if !last.IsZero() && s.now().Sub(last) < loginCleanupInterval {
+		return nil
+	}
+	ok, err := s.presence.TryAcquireCleanupLock(ctx, 2*time.Minute)
+	if err != nil || !ok {
+		return err
+	}
+	defer func() { _ = s.presence.ReleaseCleanupLock(ctx) }()
+
+	if err := s.RunEmptyRoomCleanup(ctx); err != nil {
+		return err
+	}
+	return s.presence.SetLastRoomCleanupAt(ctx, s.now().UTC())
+}
+
+// RunEmptyRoomCleanup closes rooms that were marked empty (last member left) and removes DB rows.
+func (s *Service) RunEmptyRoomCleanup(ctx context.Context) error {
+	if s.presence == nil || s.rooms == nil {
+		return nil
+	}
+	pending, err := s.presence.PendingEmptyRooms(ctx)
+	if err != nil {
+		return err
+	}
+	for _, roomID := range pending {
+		n, err := s.presence.MemberCount(ctx, roomID)
+		if err != nil {
+			continue
+		}
+		if n != 0 {
+			_ = s.presence.ClearPendingEmpty(ctx, roomID)
+			continue
+		}
+		if err := s.closeEmptyRoom(ctx, roomID); err != nil {
+			return err
+		}
+		if err := s.presence.ClearPendingEmpty(ctx, roomID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) closeEmptyRoom(ctx context.Context, roomID string) error {
+	if err := s.rooms.Delete(ctx, roomID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	_ = s.states.DeleteRoomState(ctx, roomID)
+	if s.presence != nil {
+		_ = s.presence.DeleteRoomPresence(ctx, roomID)
+	}
+	return s.PublishRoomEvent(ctx, roomID, "room_closed", nil)
+}
+
+// EnrichRoomFromCache merges Redis playback fields into a DB room for API responses.
+func (s *Service) EnrichRoomFromCache(ctx context.Context, room *model.Room) {
+	if room == nil || s.states == nil {
+		return
+	}
+	st, err := s.states.GetRoomState(ctx, room.ID)
+	if err != nil || st == nil {
+		return
+	}
+	if st.VideoID != "" {
+		room.CurrentVideo = st.VideoID
+	}
 }

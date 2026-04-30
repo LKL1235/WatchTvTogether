@@ -52,6 +52,7 @@ func testDeps(stores *memoryStores) Dependencies {
 		DownloadTaskStore: memoryDownloadTaskStore{stores},
 		SessionCache:      memory.NewSessionCache(),
 		RoomStateCache:    memory.NewRoomStateCache(),
+		RoomPresence:      memory.NewRoomPresence(),
 		PubSub:            memory.NewPubSub(),
 	}
 }

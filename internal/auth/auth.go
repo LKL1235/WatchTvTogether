@@ -47,10 +47,17 @@ type Service struct {
 	sessions cache.SessionCache
 	cfg      config.Config
 	now      func() time.Time
+
+	afterLogin func(context.Context) error
 }
 
 func NewService(users store.UserStore, sessions cache.SessionCache, cfg config.Config) *Service {
 	return &Service{users: users, sessions: sessions, cfg: cfg, now: time.Now}
+}
+
+// SetAfterLogin registers a hook invoked after successful login and register token issuance (e.g. periodic cleanup).
+func (s *Service) SetAfterLogin(fn func(context.Context) error) {
+	s.afterLogin = fn
 }
 
 func (s *Service) Register(ctx context.Context, username, password, nickname, avatarURL string) (*model.User, TokenPair, error) {
@@ -79,6 +86,7 @@ func (s *Service) Register(ctx context.Context, username, password, nickname, av
 	if err != nil {
 		return nil, TokenPair{}, err
 	}
+	s.runAfterLogin(ctx)
 	return user, tokens, nil
 }
 
@@ -97,7 +105,15 @@ func (s *Service) Login(ctx context.Context, username, password string) (*model.
 	if err != nil {
 		return nil, TokenPair{}, err
 	}
+	s.runAfterLogin(ctx)
 	return user, tokens, nil
+}
+
+func (s *Service) runAfterLogin(ctx context.Context) {
+	if s.afterLogin == nil {
+		return
+	}
+	_ = s.afterLogin(ctx)
 }
 
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {

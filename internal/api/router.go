@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-contrib/cors"
@@ -26,6 +27,7 @@ type Dependencies struct {
 	DownloadTaskStore store.DownloadTaskStore
 	SessionCache      cache.SessionCache
 	RoomStateCache    cache.RoomStateCache
+	RoomPresence      cache.RoomPresence
 	PubSub            cache.PubSub
 	Realtime          realtime.Service
 	Capabilities      capabilities.Report
@@ -53,7 +55,10 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	router.StaticFS("/static/posters", http.Dir(deps.Config.PosterDir))
 
 	authService := auth.NewService(deps.UserStore, deps.SessionCache, deps.Config)
-	rooms := roomhub.NewService(deps.RoomStateCache, deps.Realtime)
+	rooms := roomhub.NewService(deps.RoomStateCache, deps.RoomPresence, deps.RoomStore, deps.VideoStore, deps.Realtime)
+	authService.SetAfterLogin(func(ctx context.Context) error {
+		return rooms.MaybeRunGlobalCleanup(ctx)
+	})
 	registerCapabilityRoutes(router, deps)
 	registerAuthRoutes(router, deps, authService)
 	registerRoomRoutes(router, deps, authService, rooms)

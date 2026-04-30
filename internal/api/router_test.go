@@ -57,6 +57,38 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	})
 	memberAccess := tokenFrom(t, member.Body.Bytes(), "access_token")
 
+	memberJoinA := postJSON(t, server.URL+"/api/rooms/"+roomID+"/join", memberAccess, map[string]string{})
+	if memberJoinA.Code != http.StatusOK {
+		t.Fatalf("member join A status = %d body = %s", memberJoinA.Code, memberJoinA.Body.String())
+	}
+	snapMembers := postJSON(t, server.URL+"/api/rooms/"+roomID+"/snapshot", memberAccess, map[string]string{})
+	if snapMembers.Code != http.StatusOK {
+		t.Fatalf("snapshot with members status = %d body = %s", snapMembers.Code, snapMembers.Body.String())
+	}
+	if numericField(t, snapMembers.Body.Bytes(), "viewer_count") != 1 {
+		t.Fatalf("snapshot viewer_count want 1: %s", snapMembers.Body.String())
+	}
+	roomB := postJSON(t, server.URL+"/api/rooms", ownerAccess, map[string]string{
+		"name":       "Second Room",
+		"visibility": "public",
+	})
+	if roomB.Code != http.StatusCreated {
+		t.Fatalf("create room B status = %d body = %s", roomB.Code, roomB.Body.String())
+	}
+	roomBID := stringField(t, roomB.Body.Bytes(), "id")
+	conflictJoin := postJSON(t, server.URL+"/api/rooms/"+roomBID+"/join", memberAccess, map[string]string{})
+	if conflictJoin.Code != http.StatusConflict {
+		t.Fatalf("join second room should conflict, got %d body = %s", conflictJoin.Code, conflictJoin.Body.String())
+	}
+	leaveA := postJSON(t, server.URL+"/api/rooms/"+roomID+"/leave", memberAccess, map[string]string{})
+	if leaveA.Code != http.StatusNoContent {
+		t.Fatalf("leave A status = %d body = %s", leaveA.Code, leaveA.Body.String())
+	}
+	joinB := postJSON(t, server.URL+"/api/rooms/"+roomBID+"/join", memberAccess, map[string]string{})
+	if joinB.Code != http.StatusOK {
+		t.Fatalf("join B status = %d body = %s", joinB.Code, joinB.Body.String())
+	}
+
 	memberControl := postJSON(t, server.URL+"/api/rooms/"+roomID+"/control", memberAccess, map[string]any{
 		"action":   "seek",
 		"position": 42.5,
@@ -102,7 +134,7 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 		t.Fatalf("snapshot queue = %#v body = %s", got, snapshot.Body.String())
 	}
 	if numericField(t, snapshot.Body.Bytes(), "viewer_count") != 0 {
-		t.Fatalf("snapshot should not expose backend viewer_count from websocket hub: %s", snapshot.Body.String())
+		t.Fatalf("snapshot viewer_count after member moved rooms should be 0: %s", snapshot.Body.String())
 	}
 	tokenResp := postJSON(t, server.URL+"/api/ably/token", memberAccess, map[string]string{
 		"room_id": roomID,
@@ -136,14 +168,25 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 		t.Fatalf("debug rooms status = %d body = %s", debug.Code, debug.Body.String())
 	}
 	items := objectSliceField(t, debug.Body.Bytes(), "items")
-	if len(items) != 1 {
-		t.Fatalf("debug rooms items = %#v", items)
+	var dbgRoom map[string]any
+	for _, it := range items {
+		rm, ok := it["room"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, _ := rm["id"].(string); id == roomID {
+			dbgRoom = it
+			break
+		}
 	}
-	if got, _ := items[0]["viewer_count"].(float64); got != 0 {
-		t.Fatalf("debug room viewer_count = %#v", items[0])
+	if dbgRoom == nil {
+		t.Fatalf("debug rooms missing room %s in %#v", roomID, items)
 	}
-	if got, _ := items[0]["queue"].([]any); len(got) != 2 || got[1] != "video-2" {
-		t.Fatalf("debug room queue = %#v", items[0])
+	if got, _ := dbgRoom["viewer_count"].(float64); got != 0 {
+		t.Fatalf("debug room viewer_count = %#v", dbgRoom)
+	}
+	if got, _ := dbgRoom["queue"].([]any); len(got) != 2 || got[1] != "video-2" {
+		t.Fatalf("debug room queue = %#v", dbgRoom)
 	}
 }
 
