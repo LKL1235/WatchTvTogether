@@ -31,12 +31,13 @@ type stores struct {
 	downloadTasks store.DownloadTaskStore
 }
 
-type caches struct {
-	close      func() error
-	sessions   cache.SessionCache
-	roomStates cache.RoomStateCache
-	pubsub     cache.PubSub
-}
+type 	caches struct {
+		close        func() error
+		sessions     cache.SessionCache
+		roomStates   cache.RoomStateCache
+		roomPresence cache.RoomPresence
+		pubsub       cache.PubSub
+	}
 
 func main() {
 	if err := run(); err != nil {
@@ -84,6 +85,7 @@ func run() error {
 		DownloadTaskStore: st.downloadTasks,
 		SessionCache:      ca.sessions,
 		RoomStateCache:    ca.roomStates,
+		RoomPresence:      ca.roomPresence,
 		PubSub:            ca.pubsub,
 		Realtime:          realtime,
 		Capabilities:      caps,
@@ -140,9 +142,10 @@ func newCaches(cfg config.Config) (*caches, error) {
 	switch cfg.CacheBackend {
 	case "memory":
 		return &caches{
-			sessions:   memory.NewSessionCache(),
-			roomStates: memory.NewRoomStateCache(),
-			pubsub:     memory.NewPubSub(),
+			sessions:     memory.NewSessionCache(),
+			roomStates:   memory.NewRoomStateCache(),
+			roomPresence: memory.NewRoomPresence(),
+			pubsub:       memory.NewPubSub(),
 		}, nil
 	case "redis":
 		client, err := rediscache.NewClient(cfg.RedisAddr, cfg.RedisURL)
@@ -154,10 +157,11 @@ func newCaches(cfg config.Config) (*caches, error) {
 			return nil, err
 		}
 		return &caches{
-			close:      client.Close,
-			sessions:   rediscache.NewSessionCache(client),
-			roomStates: rediscache.NewRoomStateCache(client),
-			pubsub:     rediscache.NewPubSub(client),
+			close:        client.Close,
+			sessions:     rediscache.NewSessionCache(client),
+			roomStates:   rediscache.NewRoomStateCache(client),
+			roomPresence: rediscache.NewRoomPresence(client),
+			pubsub:       rediscache.NewPubSub(client),
 		}, nil
 	default:
 		return nil, errors.New("unsupported cache backend: " + cfg.CacheBackend)

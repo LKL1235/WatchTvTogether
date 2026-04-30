@@ -92,12 +92,34 @@ const (
 	PlaybackActionSwitch PlaybackAction = "switch"
 )
 
+// PlaybackMode defines how the queue advances after the current video ends.
+type PlaybackMode string
+
+const (
+	PlaybackModeSequential PlaybackMode = "sequential"
+	PlaybackModeLoop       PlaybackMode = "loop"
+)
+
 type RoomState struct {
 	RoomID    string         `json:"room_id"`
 	VideoID   string         `json:"video_id,omitempty"`
 	Queue     []string       `json:"queue,omitempty"`
+	QueueMeta []QueueItemRef `json:"queue_meta,omitempty"`
 	Action    PlaybackAction `json:"action"`
 	Position  float64        `json:"position"`
-	UpdatedBy string         `json:"updated_by,omitempty"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	// PlaybackMode is authoritative for queue behaviour (order vs loop).
+	PlaybackMode PlaybackMode `json:"playback_mode,omitempty"`
+	// VideoDuration is the duration of the current video in seconds when known (for progress projection).
+	VideoDuration float64 `json:"video_duration,omitempty"`
+	// ControlVersion increases on each owner control/snapshot write so stale clients cannot overwrite newer state.
+	ControlVersion int64 `json:"control_version,omitempty"`
+	UpdatedBy      string         `json:"updated_by,omitempty"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+}
+
+// QueueItemRef holds stable ordering and optional metadata references for queue items in Redis.
+type QueueItemRef struct {
+	ID       string `json:"id"`
+	VideoID  string `json:"video_id,omitempty"`
+	Position int    `json:"position"`
 }

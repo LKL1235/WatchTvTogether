@@ -11,6 +11,8 @@ import (
 	"watchtogether/internal/store"
 )
 
+const roomStateTTL = 7 * 24 * time.Hour
+
 type RoomStateCache struct {
 	client goredis.UniversalClient
 }
@@ -29,7 +31,7 @@ func (c *RoomStateCache) SetRoomState(ctx context.Context, roomID string, state 
 	if err != nil {
 		return err
 	}
-	return c.client.Set(ctx, roomStateKey(roomID), payload, 0).Err()
+	return c.client.Set(ctx, roomStateKey(roomID), payload, roomStateTTL).Err()
 }
 
 func (c *RoomStateCache) GetRoomState(ctx context.Context, roomID string) (*model.RoomState, error) {

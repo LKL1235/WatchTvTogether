@@ -45,7 +45,7 @@ func (h *debugHandler) rooms(c *gin.Context) {
 	}
 
 	items := make([]*debugRoomResponse, 0, len(rooms))
-	for _, room := range rooms {
+		for _, room := range rooms {
 		snapshot := h.roomService.Snapshot(ctx, room.ID)
 		state := snapshot.State
 		if state == nil {
@@ -73,12 +73,25 @@ func (h *debugHandler) rooms(c *gin.Context) {
 			}
 		}
 
+		var users []roomhub.User
+		if h.deps.RoomPresence != nil {
+			members, err := h.deps.RoomPresence.ListMembers(ctx, room.ID)
+			if err != nil {
+				respondStoreError(c, err)
+				return
+			}
+			users = make([]roomhub.User, 0, len(members))
+			for _, m := range members {
+				users = append(users, roomhub.User{ID: m.UserID, Username: m.Username})
+			}
+		}
+
 		items = append(items, &debugRoomResponse{
 			Room:        room,
 			State:       state,
-			Users:       []roomhub.User{},
+			Users:       users,
 			Queue:       queue,
-			ViewerCount: 0,
+			ViewerCount: snapshot.ViewerCount,
 		})
 	}
 
