@@ -10,9 +10,10 @@
 - 显示名不唯一；不要把显示名用于登录唯一性判断。
 - 登录允许使用邮箱或用户名 + 密码。
 - 后端通过 `RESEND_API_KEY` 调用 Resend 发送邮件。
-- 邮件发送域名为 `verify.bestlkl.top`，sender 为 `login@verify.bestlkl.top`。
+- 邮件发送域名为 `verify.bestlkl.top`，sender 固定为 `WatchTogether <login@verify.bestlkl.top>`。
 - 邮箱验证码为 6 位，有效期 10 分钟，同一邮箱/用途 1 分钟只能发送 1 次，每日限制 5 次。
 - Ably 鉴权不再返回 Ably TokenDetails，而是由后端签发 Ably JWT 给客户端。
+- Ably JWT capability 按房间控制频道 `subscribe/presence/history` 规划，客户端不直接 `publish`。
 - Ably JWT 接口返回 JSON：`{ "token": "<jwt>", "expires_at": "..." }`。
 
 ## 服务端待办
@@ -22,7 +23,7 @@
 - [ ] 增加邮件发送模块，建议放在 `internal/email` 或类似目录。
   - [ ] 使用 Resend Go SDK：`github.com/resend/resend-go/v3`。
   - [ ] 从环境变量读取 `RESEND_API_KEY`，不要写入配置文件默认值，不要暴露给前端。
-  - [ ] 使用已确认发送身份：域名 `verify.bestlkl.top`，sender `login@verify.bestlkl.top`。
+  - [ ] 使用已确认发送身份：域名 `verify.bestlkl.top`，sender 固定为 `WatchTogether <login@verify.bestlkl.top>`。
   - [ ] 增加邮件发件人配置，例如 `RESEND_FROM` / `EMAIL_FROM`，默认示例为 `WatchTogether <login@verify.bestlkl.top>`。
   - [ ] 明确本地开发策略：未配置 `RESEND_API_KEY` 时是启动失败、禁用邮件功能，还是使用日志输出 mock sender。
 - [ ] 按 Resend 文档封装发送接口。
@@ -33,6 +34,7 @@
   - [ ] 记录 Resend 返回的 email id，便于排查投递问题；不要记录验证码明文。
 - [ ] 邮件模板与安全。
   - [ ] 验证码邮件包含 6 位验证码、10 分钟过期时间、用途说明。
+  - [ ] 邮件品牌模板、Logo、文案语气由实现方自主设计，保持简洁、可信、移动端可读。
   - [ ] 邮件 HTML 做基础样式即可；同时考虑纯文本 fallback。
   - [ ] 邮件内容不要包含 access token、refresh token、密码或其它敏感信息。
 
@@ -77,7 +79,7 @@
   - [ ] 验证码生成 6 位数字码。
   - [ ] `purpose` 至少区分 `register` 和 `reset_password`。
   - [ ] `expires_at` 固定按 10 分钟有效期计算。
-  - [ ] 同一邮箱 + purpose 发送冷却 1 分钟，每日发送上限 5 次。
+  - [ ] 发送限制口径固定为邮箱 + purpose：冷却 1 分钟，每日发送上限 5 次。
   - [ ] 验证成功后立即标记 consumed 或删除。
 
 ### 4. 注册流程重做
@@ -149,7 +151,7 @@
     - `x-ably-capability`：JSON 字符串，例如 `{"watchtogether:room:<roomId>:control":["subscribe","presence","history"]}`。
     - `x-ably-clientId`：当前登录用户 `id`，继续保持用户 id 唯一且稳定。
   - [ ] TTL 复用或重命名当前 `ABLY_TOKEN_TTL`；若重命名为 `ABLY_JWT_TTL`，需要提供迁移说明。
-  - [ ] 能力范围不要包含 `publish`，除非未来确认客户端需要直接 publish。
+  - [ ] 能力范围固定为房间控制频道 `subscribe/presence/history`，不包含 `publish`。
 - [ ] 调整 API。
   - [ ] 当前 `POST /api/ably/token` 返回 Ably `TokenDetails` JSON。
   - [ ] 改为返回 JSON：`{ "token": "<jwt>", "expires_at": "..." }`。
@@ -283,7 +285,4 @@
 
 ## 不确定/需要进一步确认的文档与产品点
 
-- [ ] Resend sender 显示名是否固定为 `WatchTogether`，还是只使用裸邮箱 `login@verify.bestlkl.top`。
-- [ ] 邮件品牌模板、Logo、文案语气是否需要单独设计；当前仅确认发送域名 `verify.bestlkl.top` 和 sender `login@verify.bestlkl.top`。
-- [ ] 验证码每日限制的统计口径：按邮箱 + purpose、按邮箱总量、按 IP，还是组合限制；当前按邮箱 + purpose 每日 5 次规划。
-- [ ] Ably JWT capability 细节：目前按房间控制频道 `subscribe/presence/history` 规划；如果未来客户端需要直接 publish 某些低风险事件，需要重新评估 capability。
+- [ ] 暂无；当前已确认 sender 显示名、邮件模板设计权限、验证码每日限制口径和 Ably JWT capability。
