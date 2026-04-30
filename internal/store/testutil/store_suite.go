@@ -28,6 +28,7 @@ func RunStoreSuite(t *testing.T, newSuite func(t *testing.T) Suite) {
 		now := time.Now().UTC()
 		user := &model.User{
 			ID:           uuid.NewString(),
+			Email:        "alice@example.test",
 			Username:     "alice",
 			PasswordHash: "hash",
 			Nickname:     "Alice",

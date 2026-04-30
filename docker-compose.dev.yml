@@ -13,10 +13,20 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
     build: .
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "8080:8080"
@@ -24,11 +34,14 @@ services:
       ADDR: ":8080"
       STORAGE_BACKEND: postgres
       POSTGRES_DSN: postgres://watchtogether:watchtogether@postgres:5432/watchtogether?sslmode=disable
-      CACHE_BACKEND: memory
+      CACHE_BACKEND: redis
+      REDIS_ADDR: redis:6379
       JWT_SECRET: dev-change-me
       ABLY_ROOT_KEY: ${ABLY_ROOT_KEY:-}
       ABLY_TOKEN_TTL: ${ABLY_TOKEN_TTL:-30m}
       ABLY_CHANNEL_PREFIX: ${ABLY_CHANNEL_PREFIX:-watchtogether}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-WatchTogether <login@verify.bestlkl.top>}
       STORAGE_DIR: /data/videos
       POSTER_DIR: /data/posters
     healthcheck:

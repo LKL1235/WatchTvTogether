@@ -24,11 +24,15 @@ func NewUserStore(db *sql.DB) *UserStore {
 }
 
 func (s *UserStore) GetByID(ctx context.Context, id string) (*model.User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, password_hash, nickname, avatar_url, role, created_at, updated_at FROM users WHERE id = $1`, id))
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, email, username, password_hash, nickname, avatar_url, role, created_at, updated_at FROM users WHERE id = $1`, id))
 }
 
 func (s *UserStore) GetByUsername(ctx context.Context, username string) (*model.User, error) {
-	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, username, password_hash, nickname, avatar_url, role, created_at, updated_at FROM users WHERE username = $1`, username))
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, email, username, password_hash, nickname, avatar_url, role, created_at, updated_at FROM users WHERE LOWER(username) = LOWER($1)`, username))
+}
+
+func (s *UserStore) GetByEmail(ctx context.Context, email string) (*model.User, error) {
+	return scanUser(s.db.QueryRowContext(ctx, `SELECT id, email, username, password_hash, nickname, avatar_url, role, created_at, updated_at FROM users WHERE LOWER(email) = LOWER($1)`, email))
 }
 
 func (s *UserStore) Create(ctx context.Context, user *model.User) error {
@@ -43,15 +47,15 @@ func (s *UserStore) Create(ctx context.Context, user *model.User) error {
 		user.CreatedAt = now
 	}
 	user.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `INSERT INTO users (id, username, password_hash, nickname, avatar_url, role, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		user.ID, user.Username, user.PasswordHash, user.Nickname, user.AvatarURL, string(user.Role), user.CreatedAt, user.UpdatedAt)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO users (id, email, username, password_hash, nickname, avatar_url, role, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		user.ID, user.Email, user.Username, user.PasswordHash, user.Nickname, user.AvatarURL, string(user.Role), user.CreatedAt, user.UpdatedAt)
 	return wrapConstraint(err)
 }
 
 func (s *UserStore) Update(ctx context.Context, user *model.User) error {
 	user.UpdatedAt = utcNow()
-	res, err := s.db.ExecContext(ctx, `UPDATE users SET username = $1, password_hash = $2, nickname = $3, avatar_url = $4, role = $5, updated_at = $6 WHERE id = $7`,
-		user.Username, user.PasswordHash, user.Nickname, user.AvatarURL, string(user.Role), user.UpdatedAt, user.ID)
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET email = $1, username = $2, password_hash = $3, nickname = $4, avatar_url = $5, role = $6, updated_at = $7 WHERE id = $8`,
+		user.Email, user.Username, user.PasswordHash, user.Nickname, user.AvatarURL, string(user.Role), user.UpdatedAt, user.ID)
 	if err != nil {
 		return wrapConstraint(err)
 	}
@@ -318,7 +322,7 @@ func scanUser(scanner interface {
 }) (*model.User, error) {
 	var user model.User
 	var role string
-	if err := scanner.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Nickname, &user.AvatarURL, &role, &user.CreatedAt, &user.UpdatedAt); err != nil {
+	if err := scanner.Scan(&user.ID, &user.Email, &user.Username, &user.PasswordHash, &user.Nickname, &user.AvatarURL, &role, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		return nil, wrapNotFound(err)
 	}
 	user.Role = model.UserRole(role)

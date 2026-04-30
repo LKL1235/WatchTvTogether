@@ -2,11 +2,8 @@ package realtime
 
 import (
 	"context"
-
-	ablysdk "github.com/ably/ably-go/ably"
+	"time"
 )
-
-type TokenDetails = ablysdk.TokenDetails
 
 const (
 	MessageRoomSnapshot = "room.snapshot"
@@ -22,7 +19,7 @@ type Publisher interface {
 }
 
 type TokenIssuer interface {
-	RequestRoomToken(ctx context.Context, roomID string, clientID string) (*ablysdk.TokenDetails, error)
+	IssueRoomJWT(ctx context.Context, roomID string, clientID string) (token string, expiresAt time.Time, err error)
 }
 
 type Service interface {

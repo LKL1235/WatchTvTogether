@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,15 +14,28 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-
-	ablysdk "github.com/ably/ably-go/ably"
+	"github.com/golang-jwt/jwt/v5"
 
 	"watchtogether/internal/capabilities"
 	"watchtogether/internal/download"
+	"watchtogether/internal/emailcode"
 	"watchtogether/internal/model"
 	"watchtogether/internal/room"
 	"watchtogether/pkg/ffmpeg"
 )
+
+func registerUser(t *testing.T, serverURL, email, username, password string) *httptest.ResponseRecorder {
+	t.Helper()
+	emailcode.UseDeterministicEmailCodeForTests("123456")
+	t.Cleanup(emailcode.ClearDeterministicEmailCodeForTest)
+	send := postJSON(t, serverURL+"/api/auth/register/code", "", map[string]string{"email": email})
+	if send.Code != http.StatusOK {
+		t.Fatalf("register code status = %d body = %s", send.Code, send.Body.String())
+	}
+	return postJSON(t, serverURL+"/api/auth/register", "", map[string]any{
+		"email": email, "username": username, "password": password, "code": "123456",
+	})
+}
 
 func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -33,10 +47,7 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	server := httptest.NewServer(router)
 	defer server.Close()
 
-	register := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
-		"username": "owner",
-		"password": "password123",
-	})
+	register := registerUser(t, server.URL, "owner@example.test", "owner", "Password123")
 	if register.Code != http.StatusCreated {
 		t.Fatalf("register status = %d body = %s", register.Code, register.Body.String())
 	}
@@ -51,10 +62,7 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	}
 	roomID := stringField(t, create.Body.Bytes(), "id")
 
-	member := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
-		"username": "member",
-		"password": "password123",
-	})
+	member := registerUser(t, server.URL, "member@example.test", "member", "Password123")
 	memberAccess := tokenFrom(t, member.Body.Bytes(), "access_token")
 
 	memberJoinA := postJSON(t, server.URL+"/api/rooms/"+roomID+"/join", memberAccess, map[string]string{})
@@ -151,8 +159,48 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	if tokenResp.Code != http.StatusOK {
 		t.Fatalf("ably token status = %d body = %s", tokenResp.Code, tokenResp.Body.String())
 	}
-	if got := stringField(t, tokenResp.Body.Bytes(), "capability"); !strings.Contains(got, `"watchtogether:room:`) || strings.Contains(got, "publish") {
-		t.Fatalf("unexpected token capability: %s", got)
+	jwtStr := stringField(t, tokenResp.Body.Bytes(), "token")
+	if jwtStr == "" {
+		t.Fatalf("missing ably jwt token: %s", tokenResp.Body.String())
+	}
+	parts := strings.Split(jwtStr, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected JWT with 3 segments: %s", jwtStr)
+	}
+	hdrJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hdr map[string]any
+	if err := json.Unmarshal(hdrJSON, &hdr); err != nil {
+		t.Fatal(err)
+	}
+	if hdr["alg"] != "HS256" || hdr["kid"] != "app.key" {
+		t.Fatalf("unexpected jwt header: %v", hdr)
+	}
+	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pl map[string]any
+	if err := json.Unmarshal(payloadJSON, &pl); err != nil {
+		t.Fatal(err)
+	}
+	capStr, _ := pl["x-ably-capability"].(string)
+	if !strings.Contains(capStr, `"watchtogether:room:`) || strings.Contains(capStr, "publish") {
+		t.Fatalf("unexpected jwt capability: %s", capStr)
+	}
+	if cid, _ := pl["x-ably-clientId"].(string); cid == "" {
+		t.Fatalf("missing x-ably-clientId: %v", pl)
+	}
+	if _, ok := pl["iat"]; !ok {
+		t.Fatalf("missing iat: %v", pl)
+	}
+	if _, ok := pl["exp"]; !ok {
+		t.Fatalf("missing exp: %v", pl)
+	}
+	if expAt := stringField(t, tokenResp.Body.Bytes(), "expires_at"); expAt == "" {
+		t.Fatalf("missing expires_at: %s", tokenResp.Body.String())
 	}
 	if route := getJSON(t, server.URL+"/ws/room/"+roomID, ownerAccess); route.Code != http.StatusNotFound {
 		t.Fatalf("room websocket route status = %d body = %s", route.Code, route.Body.String())
@@ -167,8 +215,8 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	adminLogin := postJSON(t, server.URL+"/api/auth/login", "", map[string]string{
-		"username": "owner",
-		"password": "password123",
+		"login":    "owner@example.test",
+		"password": "Password123",
 	})
 	adminToken := tokenFrom(t, adminLogin.Body.Bytes(), "access_token")
 	adminRooms := getJSON(t, server.URL+"/api/admin/rooms?limit=10", adminToken)
@@ -215,10 +263,7 @@ func TestPrivateRoomRequiresPasswordForJoinSnapshotAndToken(t *testing.T) {
 	server := httptest.NewServer(router)
 	defer server.Close()
 
-	ownerRegister := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
-		"username": "owner",
-		"password": "password123",
-	})
+	ownerRegister := registerUser(t, server.URL, "owner2@example.test", "owner", "Password123")
 	ownerAccess := tokenFrom(t, ownerRegister.Body.Bytes(), "access_token")
 	create := postJSON(t, server.URL+"/api/rooms", ownerAccess, map[string]string{
 		"name":       "Secret Movie",
@@ -230,10 +275,7 @@ func TestPrivateRoomRequiresPasswordForJoinSnapshotAndToken(t *testing.T) {
 	}
 	roomID := stringField(t, create.Body.Bytes(), "id")
 
-	memberRegister := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
-		"username": "member",
-		"password": "password123",
-	})
+	memberRegister := registerUser(t, server.URL, "member2@example.test", "member", "Password123")
 	memberAccess := tokenFrom(t, memberRegister.Body.Bytes(), "access_token")
 
 	for name, resp := range map[string]*httptest.ResponseRecorder{
@@ -268,10 +310,7 @@ func TestPrivateRoomAccessSkipsPasswordOnRepeat(t *testing.T) {
 	server := httptest.NewServer(router)
 	defer server.Close()
 
-	owner := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
-		"username": "owner",
-		"password": "password123",
-	})
+	owner := registerUser(t, server.URL, "owner3@example.test", "owner", "Password123")
 	ownerAccess := tokenFrom(t, owner.Body.Bytes(), "access_token")
 	create := postJSON(t, server.URL+"/api/rooms", ownerAccess, map[string]string{
 		"name":       "Secret",
@@ -280,15 +319,9 @@ func TestPrivateRoomAccessSkipsPasswordOnRepeat(t *testing.T) {
 	})
 	roomID := stringField(t, create.Body.Bytes(), "id")
 
-	member := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
-		"username": "member",
-		"password": "password123",
-	})
+	member := registerUser(t, server.URL, "member4@example.test", "member", "Password123")
 	memberAccess := tokenFrom(t, member.Body.Bytes(), "access_token")
-	other := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
-		"username": "other",
-		"password": "password123",
-	})
+	other := registerUser(t, server.URL, "other@example.test", "other", "Password123")
 	otherAccess := tokenFrom(t, other.Body.Bytes(), "access_token")
 
 	if postJSON(t, server.URL+"/api/rooms/"+roomID+"/join", memberAccess, map[string]string{}).Code != http.StatusForbidden {
@@ -338,10 +371,7 @@ func TestSnapshotPlayAndPauseReflectsRoomState(t *testing.T) {
 		Status:   model.VideoStatusReady,
 	})
 
-	owner := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
-		"username": "snapowner",
-		"password": "password123",
-	})
+	owner := registerUser(t, server.URL, "snapowner@example.test", "snapowner", "Password123")
 	ownerAccess := tokenFrom(t, owner.Body.Bytes(), "access_token")
 	create := postJSON(t, server.URL+"/api/rooms", ownerAccess, map[string]string{
 		"name": "R", "visibility": "public",
@@ -354,9 +384,7 @@ func TestSnapshotPlayAndPauseReflectsRoomState(t *testing.T) {
 	if play.Code != http.StatusOK {
 		t.Fatalf("control play: %d %s", play.Code, play.Body.String())
 	}
-	member := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
-		"username": "snapmember", "password": "password123",
-	})
+	member := registerUser(t, server.URL, "snapmember@example.test", "snapmember", "Password123")
 	memberAccess := tokenFrom(t, member.Body.Bytes(), "access_token")
 	postJSON(t, server.URL+"/api/rooms/"+roomID+"/join", memberAccess, map[string]string{})
 	snap := postJSON(t, server.URL+"/api/rooms/"+roomID+"/snapshot", memberAccess, map[string]string{})
@@ -436,10 +464,7 @@ func TestCapabilitiesDownloadsAndVideosFlow(t *testing.T) {
 	server := httptest.NewServer(router)
 	defer server.Close()
 
-	register := postJSON(t, server.URL+"/api/auth/register", "", map[string]string{
-		"username": "admin",
-		"password": "password123",
-	})
+	register := registerUser(t, server.URL, "admin@example.test", "admin", "Password123")
 	adminID := userIDFrom(t, register.Body.Bytes())
 	admin, err := deps.UserStore.GetByID(context.Background(), adminID)
 	if err != nil {
@@ -450,8 +475,8 @@ func TestCapabilitiesDownloadsAndVideosFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	login := postJSON(t, server.URL+"/api/auth/login", "", map[string]string{
-		"username": "admin",
-		"password": "password123",
+		"login":    "admin",
+		"password": "Password123",
 	})
 	token := tokenFrom(t, login.Body.Bytes(), "access_token")
 
@@ -728,18 +753,29 @@ func (f *fakeRealtime) RoomCapability(roomID string) (string, error) {
 	return `{"` + f.ChannelName(roomID) + `":["subscribe","presence","history"]}`, nil
 }
 
-func (f *fakeRealtime) RequestRoomToken(ctx context.Context, roomID, clientID string) (*ablysdk.TokenDetails, error) {
-	capability, err := f.RoomCapability(roomID)
+func (f *fakeRealtime) IssueRoomJWT(ctx context.Context, roomID, clientID string) (string, time.Time, error) {
+	_ = ctx
+	now := time.Now().UTC()
+	exp := now.Add(30 * time.Minute)
+	capJSON, err := f.RoomCapability(roomID)
 	if err != nil {
-		return nil, err
+		return "", time.Time{}, err
 	}
-	return &ablysdk.TokenDetails{
-		Token:      "fake-token",
-		Expires:    time.Now().Add(30 * time.Minute).UnixMilli(),
-		Issued:     time.Now().UnixMilli(),
-		Capability: capability,
-		ClientID:   clientID,
-	}, nil
+	claims := jwt.MapClaims{
+		"iat":               now.Unix(),
+		"exp":               exp.Unix(),
+		"x-ably-capability": capJSON,
+		"x-ably-clientId":   clientID,
+		"x-ably-token-type": "jwt",
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tok.Header["typ"] = "JWT"
+	tok.Header["kid"] = "app.key"
+	signed, err := tok.SignedString([]byte("secret"))
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return signed, exp, nil
 }
 
 func (f *fakeRealtime) PublishRoomMessage(ctx context.Context, roomID, name string, data any) error {

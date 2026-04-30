@@ -14,6 +14,8 @@ import (
 	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
 	"watchtogether/internal/download"
+	"watchtogether/internal/email"
+	"watchtogether/internal/emailcode"
 	"watchtogether/internal/realtime"
 	roomhub "watchtogether/internal/room"
 	"watchtogether/internal/store"
@@ -27,6 +29,8 @@ type Dependencies struct {
 	RoomStore         store.RoomStore
 	VideoStore        store.VideoStore
 	DownloadTaskStore store.DownloadTaskStore
+	EmailSender       email.SenderAPI
+	EmailCodes        *emailcode.Store
 	SessionCache      cache.SessionCache
 	RoomStateCache    cache.RoomStateCache
 	RoomPresence      cache.RoomPresence
@@ -57,7 +61,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	router.StaticFS("/static/videos", http.Dir(deps.Config.StorageDir))
 	router.StaticFS("/static/posters", http.Dir(deps.Config.PosterDir))
 
-	authService := auth.NewService(deps.UserStore, deps.SessionCache, deps.Config)
+	authService := auth.NewService(deps.UserStore, deps.SessionCache, deps.EmailCodes, deps.Config)
 	rooms := roomhub.NewService(deps.RoomStateCache, deps.RoomPresence, deps.RoomStore, deps.VideoStore, deps.RoomAccess, deps.Realtime)
 	authService.SetAfterLogin(func(ctx context.Context) error {
 		go func() {

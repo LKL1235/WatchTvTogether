@@ -13,6 +13,13 @@ aria2_rpc_url: "http://localhost:6800/jsonrpc"
 aria2_secret: ""
 ably_root_key: ""
 ably_token_ttl: "30m"
+ably_jwt_ttl: ""
 ably_channel_prefix: "watchtogether"
+email_from: "WatchTogether <login@verify.bestlkl.top>"
+email_code_ttl: "10m"
+email_code_length: 6
+email_code_send_interval: "60s"
+email_code_daily_limit: 5
+email_code_max_attempts: 5
 # 跨域：留空或 ["*"] 为任意来源；生产环境建议列出前端 Origin。也可用环境变量 CORS_ORIGINS（逗号分隔）
 cors_origins: []

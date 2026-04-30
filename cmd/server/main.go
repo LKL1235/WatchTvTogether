@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
+
 	"watchtogether/internal/api"
 	"watchtogether/internal/cache"
 	"watchtogether/internal/cache/memory"
@@ -18,6 +20,8 @@ import (
 	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
 	"watchtogether/internal/download"
+	"watchtogether/internal/email"
+	"watchtogether/internal/emailcode"
 	ablyrealtime "watchtogether/internal/realtime/ably"
 	"watchtogether/internal/store"
 	"watchtogether/internal/store/postgres"
@@ -33,6 +37,7 @@ type stores struct {
 
 type caches struct {
 	close        func() error
+	redis        goredis.UniversalClient
 	sessions     cache.SessionCache
 	roomStates   cache.RoomStateCache
 	roomPresence cache.RoomPresence
@@ -78,12 +83,22 @@ func run() error {
 		return err
 	}
 
+	emailSender := email.NewSender(cfg)
+	var emailCodes *emailcode.Store
+	if ca.redis != nil {
+		emailCodes = emailcode.NewStore(ca.redis)
+	} else {
+		emailCodes = emailcode.NewStore(nil)
+	}
+
 	router := api.NewRouter(api.Dependencies{
 		Config:            cfg,
 		UserStore:         st.users,
 		RoomStore:         st.rooms,
 		VideoStore:        st.videos,
 		DownloadTaskStore: st.downloadTasks,
+		EmailSender:       emailSender,
+		EmailCodes:        emailCodes,
 		SessionCache:      ca.sessions,
 		RoomStateCache:    ca.roomStates,
 		RoomPresence:      ca.roomPresence,
@@ -161,6 +176,7 @@ func newCaches(cfg config.Config) (*caches, error) {
 		}
 		return &caches{
 			close:        client.Close,
+			redis:        client,
 			sessions:     rediscache.NewSessionCache(client),
 			roomStates:   rediscache.NewRoomStateCache(client),
 			roomPresence: rediscache.NewRoomPresence(client),

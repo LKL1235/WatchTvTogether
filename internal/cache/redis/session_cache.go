@@ -27,6 +27,10 @@ func (c *SessionCache) GetRefreshToken(ctx context.Context, userID string) (stri
 	return token, err
 }
 
+func (c *SessionCache) DeleteRefreshToken(ctx context.Context, userID string) error {
+	return c.client.Del(ctx, refreshTokenKey(userID)).Err()
+}
+
 func (c *SessionCache) BlacklistToken(ctx context.Context, jti string, ttl time.Duration) error {
 	return c.client.Set(ctx, blacklistKey(jti), "1", ttl).Err()
 }

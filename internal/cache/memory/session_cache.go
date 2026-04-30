@@ -53,6 +53,16 @@ func (c *SessionCache) GetRefreshToken(ctx context.Context, userID string) (stri
 	return entry.value, nil
 }
 
+func (c *SessionCache) DeleteRefreshToken(ctx context.Context, userID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.refreshTokens, userID)
+	return nil
+}
+
 func (c *SessionCache) BlacklistToken(ctx context.Context, jti string, ttl time.Duration) error {
 	if err := ctx.Err(); err != nil {
 		return err
