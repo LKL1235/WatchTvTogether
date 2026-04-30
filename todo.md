@@ -25,6 +25,11 @@
   - 空房清理为异步操作，不影响登录接口响应。
   - 新用户加入播放中的房间时，如果浏览器阻止自动播放，在视频播放器区域显示遮罩与“同步进度”按钮。
   - 空房清理判断标准是“没有在线用户”，不是“没有用户/成员记录”。
+- Redis SaaS 环境约束：
+  - 使用的是 Redis 免费版，不支持 Redis Stack 的 Triggers and Functions。
+  - 不开启/不依赖 Keyspace Notifications、Gears、Triggers 等事件钩子。
+  - 后续方案不得依赖 Redis key 过期事件、keyspace notify、Redis Functions、RedisGears 或 Redis Stack trigger 来驱动清理/离线检测。
+  - 可使用普通 Redis 数据结构、TTL 作为兜底过期、`SETNX` 锁、pipeline/transaction、Lua `EVAL` 脚本和应用层定时/登录触发扫描。
 
 ## 1. 新用户加入房间时同步播放状态
 
@@ -86,6 +91,7 @@
   - `room:access:{roomID}` 使用 set 存 userID。
   - 不依赖固定 TTL 表达产品语义；授权直到房间关闭/删除时统一清理。
   - 可保留较长 Redis TTL 作为异常兜底，但业务有效期以房间存在为准。
+  - 不使用 key 过期事件或 Keyspace Notifications 来撤销授权；授权撤销必须由房间关闭/删除、空房清理或密码变更等应用层流程显式调用。
 - [ ] `POST /api/rooms/:roomId/join`：
   - [ ] 如果用户是房主/管理员，跳过密码。
   - [ ] 如果用户已有该房授权，跳过密码。
@@ -184,6 +190,14 @@
 
 在任意用户登录时，应检查 Redis 中的上次清理时间戳。如果已经过去 5 分钟，则异步触发房间清理。清理目标是没有在线用户的房间，不是没有用户记录的房间。
 
+### Redis 能力约束
+
+- [ ] Redis 免费版不支持 Redis Stack Triggers and Functions，且不启用 Keyspace Notifications、Gears、Triggers 等事件钩子。
+- [ ] 空房清理不能设计为“监听 key 过期/成员 key 删除事件后自动触发”。
+- [ ] 离线检测不能依赖 Redis keyspace notify 或 RedisGears；需要由后端应用主动维护在线心跳/离开状态，并通过登录异步任务或应用层定时任务扫描。
+- [ ] Redis TTL 只能作为异常兜底，不能作为业务事件来源；TTL 到期后没有事件通知，只有扫描时才能观察到 key 不存在。
+- [ ] 分布式并发控制可继续使用普通 Redis `SETNX` 锁；原子迁移可继续使用 Lua `EVAL`，不需要 Redis Functions。
+
 ### 现状
 
 - 后端已有 `MaybeRunGlobalCleanup`，间隔常量为 `5 * time.Minute`。
@@ -203,6 +217,7 @@
   - [ ] 当前 pending empty 主要由后端 `POST /api/rooms/:roomId/leave` 或 presence 迁移触发；如果用户直接关闭页面、断网、刷新、浏览器崩溃，后端 Redis presence 可能仍保留 `room:members:{roomID}`，不会认为房间为空。
   - [ ] 客户端使用 Ably Presence 展示在线用户，但服务端清理使用自建 Redis presence；两套 presence 可能不一致，导致“前端看起来没人在线，后端认为仍有人在房间”。
   - [ ] Redis member TTL 当前较长，过期前可能一直阻止空房清理。
+  - [ ] 不能通过 Keyspace Notifications 监听 member TTL 过期来修正 presence，因为当前 Redis SaaS 不开启该能力。
   - [ ] `runAfterLogin` 吞掉清理错误且没有日志，Redis 连接、lock、解析时间戳等错误可能完全不可见。
   - [ ] 如果用户通过 refresh token 恢复登录态而不是调用 `/api/auth/login`，不会触发 `SetAfterLogin` hook。
   - [ ] 如果部署环境不是 Redis cache backend，memory presence 的 last cleanup/pending empty 只在单进程内有效，重启后状态丢失。
@@ -225,6 +240,9 @@
   - [ ] 登录触发清理时，如果 `last_cleanup_at` 为空或距今超过 5 分钟，尝试获取 lock。
   - [ ] 获得 lock 后扫描 pending empty，并补充扫描可能遗漏的房间（例如 DB 房间列表或 `room:active`）来发现“没有在线用户但未进入 pending empty”的房间。
   - [ ] 判定在线人数时，以真实在线状态为准；需决定服务端是否接入 Ably Presence 查询，或让客户端/服务端可靠同步在线离开事件到 Redis。
+  - [ ] 如果继续维护服务端 Redis presence，需要增加应用层心跳/续租机制：客户端定期调用轻量 heartbeat API 或服务端通过 Ably/HTTP 明确刷新在线状态；清理任务扫描 `last_seen` 超时用户并主动移除。
+  - [ ] heartbeat/last_seen 方案只能通过后端扫描判断超时，不能依赖 Redis key 过期事件触发。
+  - [ ] 如果采用 Ably Presence 作为在线事实来源，清理任务应在扫描房间时主动查询 Ably 当前 presence；不要通过 Redis 事件钩子等待通知。
   - [ ] 对没有在线用户的房间删除 DB 记录、Redis state、presence、授权缓存，并发布 `room_closed`。
   - [ ] 对已有在线用户重新进入的房间清除 pending empty。
 - [ ] 处理异常与幂等：
@@ -273,6 +291,7 @@
   - [ ] 如果旧房间成员数变为 0，移出 `room:active` 并加入 `room:pending_empty`。
   - [ ] `HSET room:members:{newRoomID}` 并更新 `user:room:{userID}`。
   - [ ] 返回旧 roomID 或空字符串。
+- [ ] 该 Redis 迁移逻辑只使用普通 Lua `EVAL` 与基础数据结构，不使用 Redis Functions/Triggers；所有 `user_left`、`user_joined` 事件由后端 join/leave handler 显式发布。
 - [ ] memory presence 实现保持同样行为，避免测试与本地开发表现不一致。
 - [ ] `room.Service.Join` 保留返回 `previousRoomID`，并在 handler 中不再将该场景映射为 409。
 - [ ] 用户加入房间成功时，向目标房间发布 `user_joined` 事件，事件 payload 至少包含 user id、username、role、is_owner。
@@ -362,6 +381,8 @@
 - [ ] 运行现有 Go 测试：`go test ./...`。
 - [ ] 为房间同步、私有房授权、presence 迁移、空房清理、管理员关闭房间补充单元/集成测试。
 - [ ] Redis 实现需要覆盖 Lua 脚本关键路径；memory 实现用于快速单测但不能替代 Redis 行为验证。
+- [ ] Redis 相关测试与实现不得依赖 Redis Stack、Redis Functions、Triggers、Gears 或 Keyspace Notifications；CI/本地可用普通 Redis 验证。
+- [ ] 空房清理测试应通过显式心跳过期/last_seen 扫描、pending empty 扫描或 Ably presence 查询 mock 来验证，不使用 key 过期事件作为触发条件。
 
 ### 客户端
 
@@ -388,3 +409,4 @@
 - [x] 空房清理失败或执行中不影响登录响应；清理应异步执行。
 - [x] 新用户加入播放中的房间时，如果浏览器阻止自动播放，在视频播放器区域展示遮罩和“同步进度”按钮。
 - [x] 空房清理目标是没有在线用户的房间，不是没有用户记录的房间。
+- [x] Redis SaaS 免费版不支持 Redis Stack Triggers and Functions，也不启用 Keyspace Notifications、Gears、Triggers 等事件钩子；方案必须使用应用层显式事件、主动扫描、普通 Redis key/hash/set、锁和 Lua 脚本实现。
