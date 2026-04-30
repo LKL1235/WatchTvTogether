@@ -31,13 +31,14 @@ type stores struct {
 	downloadTasks store.DownloadTaskStore
 }
 
-type 	caches struct {
-		close        func() error
-		sessions     cache.SessionCache
-		roomStates   cache.RoomStateCache
-		roomPresence cache.RoomPresence
-		pubsub       cache.PubSub
-	}
+type caches struct {
+	close        func() error
+	sessions     cache.SessionCache
+	roomStates   cache.RoomStateCache
+	roomPresence cache.RoomPresence
+	roomAccess   cache.RoomAccessCache
+	pubsub       cache.PubSub
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -86,6 +87,7 @@ func run() error {
 		SessionCache:      ca.sessions,
 		RoomStateCache:    ca.roomStates,
 		RoomPresence:      ca.roomPresence,
+		RoomAccess:        ca.roomAccess,
 		PubSub:            ca.pubsub,
 		Realtime:          realtime,
 		Capabilities:      caps,
@@ -145,6 +147,7 @@ func newCaches(cfg config.Config) (*caches, error) {
 			sessions:     memory.NewSessionCache(),
 			roomStates:   memory.NewRoomStateCache(),
 			roomPresence: memory.NewRoomPresence(),
+			roomAccess:   memory.NewRoomAccess(),
 			pubsub:       memory.NewPubSub(),
 		}, nil
 	case "redis":
@@ -161,6 +164,7 @@ func newCaches(cfg config.Config) (*caches, error) {
 			sessions:     rediscache.NewSessionCache(client),
 			roomStates:   rediscache.NewRoomStateCache(client),
 			roomPresence: rediscache.NewRoomPresence(client),
+			roomAccess:   rediscache.NewRoomAccess(client),
 			pubsub:       rediscache.NewPubSub(client),
 		}, nil
 	default:

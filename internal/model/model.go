@@ -115,6 +115,8 @@ type RoomState struct {
 	ControlVersion int64 `json:"control_version,omitempty"`
 	UpdatedBy      string         `json:"updated_by,omitempty"`
 	UpdatedAt      time.Time      `json:"updated_at"`
+	// BaseUpdatedAt is the last persisted control timestamp before projection; set only in API snapshots for clients that need the authoritative wall time.
+	BaseUpdatedAt time.Time `json:"base_updated_at,omitempty"`
 }
 
 // QueueItemRef holds stable ordering and optional metadata references for queue items in Redis.

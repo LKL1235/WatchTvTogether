@@ -24,15 +24,18 @@ type User struct {
 }
 
 type Message struct {
-	Type      string               `json:"type"`
-	Action    model.PlaybackAction `json:"action,omitempty"`
-	Event     string               `json:"event,omitempty"`
-	Position  float64              `json:"position,omitempty"`
-	VideoID   string               `json:"video_id,omitempty"`
-	Queue     []string             `json:"queue,omitempty"`
-	Timestamp int64                `json:"timestamp,omitempty"`
-	Payload   any                  `json:"payload,omitempty"`
-	User      *User                `json:"user,omitempty"`
+	Type            string               `json:"type"`
+	Action          model.PlaybackAction `json:"action,omitempty"`
+	Event           string               `json:"event,omitempty"`
+	Position        float64              `json:"position,omitempty"`
+	VideoID         string               `json:"video_id,omitempty"`
+	Queue           []string             `json:"queue,omitempty"`
+	Timestamp       int64                `json:"timestamp,omitempty"`
+	ControlVersion  int64                `json:"control_version,omitempty"`
+	PlaybackMode    model.PlaybackMode   `json:"playback_mode,omitempty"`
+	UpdatedAt       int64                `json:"updated_at,omitempty"`
+	Payload         any                  `json:"payload,omitempty"`
+	User            *User                `json:"user,omitempty"`
 }
 
 type Snapshot struct {
@@ -47,22 +50,24 @@ type Publisher interface {
 }
 
 type Service struct {
-	states    cache.RoomStateCache
-	presence  cache.RoomPresence
-	rooms     store.RoomStore
-	videos    store.VideoStore
-	publisher Publisher
-	now       func() time.Time
+	states     cache.RoomStateCache
+	presence   cache.RoomPresence
+	rooms      store.RoomStore
+	videos     store.VideoStore
+	roomAccess cache.RoomAccessCache
+	publisher  Publisher
+	now        func() time.Time
 }
 
-func NewService(states cache.RoomStateCache, presence cache.RoomPresence, rooms store.RoomStore, videos store.VideoStore, publisher Publisher) *Service {
+func NewService(states cache.RoomStateCache, presence cache.RoomPresence, rooms store.RoomStore, videos store.VideoStore, roomAccess cache.RoomAccessCache, publisher Publisher) *Service {
 	return &Service{
-		states:    states,
-		presence:  presence,
-		rooms:     rooms,
-		videos:    videos,
-		publisher: publisher,
-		now:       time.Now,
+		states:     states,
+		presence:   presence,
+		rooms:      rooms,
+		videos:     videos,
+		roomAccess: roomAccess,
+		publisher:  publisher,
+		now:        time.Now,
 	}
 }
 
@@ -109,6 +114,7 @@ func (s *Service) projectState(ctx context.Context, base *model.RoomState) *mode
 		return nil
 	}
 	out := *base
+	baseUpdated := base.UpdatedAt
 	duration := base.VideoDuration
 	if duration <= 0 && base.VideoID != "" && s.videos != nil {
 		if v, err := s.videos.GetByID(ctx, base.VideoID); err == nil && v != nil {
@@ -120,6 +126,7 @@ func (s *Service) projectState(ctx context.Context, base *model.RoomState) *mode
 	pos, atEnd := ProjectedPlayback(&out, now, duration)
 	out.Position = pos
 	out.UpdatedAt = now
+	out.BaseUpdatedAt = baseUpdated
 	if atEnd && duration > 0 {
 		mode := out.PlaybackMode
 		if mode == "" {
@@ -242,13 +249,16 @@ func (s *Service) ApplyControl(ctx context.Context, roomID string, user User, ms
 		return Message{}, err
 	}
 	sync := Message{
-		Type:      "sync",
-		Action:    msg.Action,
-		Position:  msg.Position,
-		VideoID:   videoID,
-		Queue:     queue,
-		Timestamp: now.Unix(),
-		User:      &user,
+		Type:            "sync",
+		Action:          msg.Action,
+		Position:        msg.Position,
+		VideoID:         videoID,
+		Queue:           queue,
+		Timestamp:       now.Unix(),
+		ControlVersion:  state.ControlVersion,
+		PlaybackMode:    state.PlaybackMode,
+		UpdatedAt:       state.UpdatedAt.Unix(),
+		User:            &user,
 	}
 	if s.publisher != nil {
 		return sync, s.publisher.PublishRoomMessage(ctx, roomID, "room.sync", sync)
@@ -291,6 +301,9 @@ func (s *Service) CloseRoom(ctx context.Context, roomID string, user *User) erro
 	}
 	if s.presence != nil {
 		_ = s.presence.DeleteRoomPresence(ctx, roomID)
+	}
+	if s.roomAccess != nil {
+		_ = s.roomAccess.DeleteRoomAccess(ctx, roomID)
 	}
 	return s.PublishRoomEvent(ctx, roomID, "room_closed", user)
 }
@@ -343,7 +356,26 @@ func (s *Service) MaybeRunGlobalCleanup(ctx context.Context) error {
 	return s.presence.SetLastRoomCleanupAt(ctx, s.now().UTC())
 }
 
-// RunEmptyRoomCleanup closes rooms that were marked empty (last member left) and removes DB rows.
+func mergeUniqueRoomIDs(parts ...[]string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, part := range parts {
+		for _, id := range part {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// RunEmptyRoomCleanup closes rooms with no online members: pending-empty set, active member sets, and DB-listed rooms.
 func (s *Service) RunEmptyRoomCleanup(ctx context.Context) error {
 	if s.presence == nil || s.rooms == nil {
 		return nil
@@ -352,7 +384,22 @@ func (s *Service) RunEmptyRoomCleanup(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, roomID := range pending {
+	active, err := s.presence.ListRoomsWithMembers(ctx)
+	if err != nil {
+		return err
+	}
+	dbRooms, _, err := s.rooms.List(ctx, store.ListRoomsOpts{Limit: 500, Offset: 0})
+	if err != nil {
+		return err
+	}
+	dbIDs := make([]string, 0, len(dbRooms))
+	for _, r := range dbRooms {
+		if r != nil {
+			dbIDs = append(dbIDs, r.ID)
+		}
+	}
+	candidates := mergeUniqueRoomIDs(pending, active, dbIDs)
+	for _, roomID := range candidates {
 		n, err := s.presence.MemberCount(ctx, roomID)
 		if err != nil {
 			continue
@@ -364,9 +411,7 @@ func (s *Service) RunEmptyRoomCleanup(ctx context.Context) error {
 		if err := s.closeEmptyRoom(ctx, roomID); err != nil {
 			return err
 		}
-		if err := s.presence.ClearPendingEmpty(ctx, roomID); err != nil {
-			return err
-		}
+		_ = s.presence.ClearPendingEmpty(ctx, roomID)
 	}
 	return nil
 }
@@ -378,6 +423,9 @@ func (s *Service) closeEmptyRoom(ctx context.Context, roomID string) error {
 	_ = s.states.DeleteRoomState(ctx, roomID)
 	if s.presence != nil {
 		_ = s.presence.DeleteRoomPresence(ctx, roomID)
+	}
+	if s.roomAccess != nil {
+		_ = s.roomAccess.DeleteRoomAccess(ctx, roomID)
 	}
 	return s.PublishRoomEvent(ctx, roomID, "room_closed", nil)
 }

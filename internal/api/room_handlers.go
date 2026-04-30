@@ -23,7 +23,8 @@ type roomHandler struct {
 
 type roomResponse struct {
 	*model.Room
-	IsOwner bool `json:"is_owner,omitempty"`
+	IsOwner    bool   `json:"is_owner,omitempty"`
+	LeftRoomID string `json:"left_room_id,omitempty"`
 }
 
 type createRoomRequest struct {
@@ -181,28 +182,28 @@ func (h *roomHandler) join(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !h.canAccessRoom(c, room, "") {
-		var req joinRoomRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			apierr.Abort(c, apierr.InvalidRequest("invalid JSON body"))
-			return
-		}
-		if !h.canAccessRoom(c, room, req.Password) {
-			apierr.Abort(c, apierr.Forbidden("invalid room password"))
-			return
-		}
-	}
 	user := currentUser(c)
+	if user == nil {
+		apierr.Abort(c, apierr.Unauthorized("authentication required"))
+		return
+	}
+	var req joinRoomRequest
+	_ = c.ShouldBindJSON(&req)
+	if !h.canAccessRoom(c, room, user.UserID, req.Password) {
+		apierr.Abort(c, apierr.Forbidden("invalid room password"))
+		return
+	}
 	u := roomUserFromClaims(user, room)
-	if _, err := h.rooms.Join(c.Request.Context(), room.ID, u); err != nil {
-		if errors.Is(err, store.ErrConflict) {
-			apierr.Abort(c, apierr.Conflict("already in another room; leave that room first"))
-			return
-		}
+	leftRoomID, err := h.rooms.Join(c.Request.Context(), room.ID, u)
+	if err != nil {
 		respondStoreError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, roomResponse{Room: room, IsOwner: user != nil && room.OwnerID == user.UserID})
+	if leftRoomID != "" {
+		_ = h.rooms.PublishRoomEvent(c.Request.Context(), leftRoomID, "user_left", userPtrFromHubUser(u))
+	}
+	_ = h.rooms.PublishRoomEvent(c.Request.Context(), room.ID, "user_joined", userPtrFromHubUser(u))
+	c.JSON(http.StatusOK, roomResponse{Room: room, IsOwner: user != nil && room.OwnerID == user.UserID, LeftRoomID: leftRoomID})
 }
 
 func (h *roomHandler) leave(c *gin.Context) {
@@ -219,6 +220,8 @@ func (h *roomHandler) leave(c *gin.Context) {
 		respondStoreError(c, err)
 		return
 	}
+	u := roomUserFromClaims(user, room)
+	_ = h.rooms.PublishRoomEvent(c.Request.Context(), room.ID, "user_left", userPtrFromHubUser(u))
 	c.Status(http.StatusNoContent)
 }
 
@@ -285,7 +288,7 @@ func (h *roomHandler) ablyToken(c *gin.Context) {
 		respondStoreError(c, err)
 		return
 	}
-	if !h.canAccessRoom(c, room, req.Password) {
+	if !h.canAccessRoom(c, room, currentClaims(c).UserID, req.Password) {
 		apierr.Abort(c, apierr.Forbidden("invalid room password"))
 		return
 	}
@@ -351,7 +354,7 @@ func (h *roomHandler) snapshot(c *gin.Context) {
 			return
 		}
 	}
-	if !h.canAccessRoom(c, room, req.Password) {
+	if !h.canAccessRoom(c, room, currentClaims(c).UserID, req.Password) {
 		apierr.Abort(c, apierr.Forbidden("invalid room password"))
 		return
 	}
@@ -404,11 +407,30 @@ func canManageRoom(c *gin.Context, room *model.Room) bool {
 	return user.Role == model.UserRoleAdmin || room.OwnerID == user.UserID
 }
 
-func (h *roomHandler) canAccessRoom(c *gin.Context, room *model.Room, password string) bool {
+func (h *roomHandler) canAccessRoom(c *gin.Context, room *model.Room, userID, password string) bool {
 	if room.Visibility != model.RoomVisibilityPrivate || canManageRoom(c, room) {
 		return true
 	}
-	return authsvc.CheckPassword(room.PasswordHash, password)
+	if h.deps.RoomAccess != nil && userID != "" {
+		if ok, err := h.deps.RoomAccess.HasRoomAccess(c.Request.Context(), room.ID, userID); err == nil && ok {
+			return true
+		}
+	}
+	if authsvc.CheckPassword(room.PasswordHash, password) {
+		if h.deps.RoomAccess != nil && userID != "" {
+			_ = h.deps.RoomAccess.GrantRoomAccess(c.Request.Context(), room.ID, userID)
+		}
+		return true
+	}
+	return false
+}
+
+func userPtrFromHubUser(u roomhub.User) *roomhub.User {
+	if u.ID == "" {
+		return nil
+	}
+	copyU := u
+	return &copyU
 }
 
 func roomUserFromClaims(claims *authsvc.Claims, room *model.Room) roomhub.User {

@@ -132,7 +132,12 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, 
 	if err != nil {
 		return TokenPair{}, err
 	}
-	return s.issuePair(ctx, user)
+	tokens, err := s.issuePair(ctx, user)
+	if err != nil {
+		return TokenPair{}, err
+	}
+	s.runAfterLogin(ctx)
+	return tokens, nil
 }
 
 func (s *Service) Logout(ctx context.Context, accessToken, refreshToken string) error {
