@@ -1,8 +1,8 @@
 # Notes
 
-## 服务端下载能力已下线
+## 前端实现参考
 
-原先依赖本机 `ffmpeg` / `yt-dlp` / `aria2` 的管理端下载任务与相关数据库表已移除；部署在无持久磁盘的平台（如 Vercel）时不应依赖「下载到服务器再播放」。视频来源应以外链、HLS、对象存储签名 URL 等与产品约定为准。
+https://github.com/LKL1235/WatchTvTogether-Web/branches
 
 ## Redis SaaS 免费版注意事项
 
