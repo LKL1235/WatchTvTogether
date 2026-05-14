@@ -1,0 +1,8 @@
+---
+description: go-scaler Agent 工作流，自动关联 CLAUDE.md
+alwaysApply: true
+---
+
+在 `go-scaler/` 内工作时，须遵守项目手册中的流程与约定（含 `docs/<任务名>_TODO.md`、方案确认后再编码、可见变更同步 README 等）。
+
+@CLAUDE.md

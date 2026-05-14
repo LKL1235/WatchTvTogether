@@ -2,6 +2,18 @@
 
 WatchTogether 的后端服务仓库（Go + Gin + Ably realtime）。
 
+## 演示提示
+
+- 演示用户必须包含 `email` 字段，否则无法完成登录。
+- 登录时请使用邮箱作为登录账号，并填写对应密码。
+
+## 开发提示
+
+- 本项目运行依赖 **PostgreSQL** 和 **Redis**：PostgreSQL 用于持久化存储，Redis 用于缓存与验证码/限流等短期状态。
+- 推荐使用仓库根目录的 `docker-compose.yml` 启动开发环境，它会同时拉起 `app`、`postgres` 和 `redis`，并等待数据库与缓存通过健康检查后再启动应用。
+- 首次启动前请确认已安装 Docker / Docker Compose，并按需配置 `.env` 或环境变量，至少应关注 `JWT_SECRET`、`ABLY_ROOT_KEY`、`RESEND_API_KEY`、`EMAIL_FROM` 等运行相关配置。
+- 默认服务端口为 `8080`，可通过 `APP_PORT` 覆盖；
+
 ## 说明
 
 本仓库为前后端分离模式，主要提供 API、认证、房间与视频元数据、以及受控的静态资源目录（`StorageDir` / `PosterDir`）映射。
@@ -29,7 +41,7 @@ WatchTogether 的后端服务仓库（Go + Gin + Ably realtime）。
 go run ./cmd/server
 ```
 
-默认读取 `config.yaml`，也支持环境变量覆盖（参考 `.env.example`）。
+默认读取 `config.yaml`，也支持环境变量覆盖（参考 `.env.example`）。本地直接运行前需先准备可访问的 PostgreSQL 与 Redis，并配置对应连接信息。
 
 ### Docker 开发模式
 
