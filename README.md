@@ -87,7 +87,7 @@ docker compose up -d --build
 
 ### 错误码补充
 
-- 房间实时聊天依赖 **`CACHE_BACKEND=redis`**：消息仅存 **Redis Stream**（与房间生命周期一致，随房间关闭清理），经服务端 **Ably REST** 向同一控制频道发布 **`room.chat`**。`memory` 缓存模式下聊天接口返回 **503**。
+- 房间实时聊天依赖 **Redis**（`CACHE_BACKEND=redis`，亦为唯一支持的缓存后端）：消息仅存 **Redis Stream**（与房间生命周期一致，随房间关闭清理），经服务端 **Ably REST** 向同一控制频道发布 **`room.chat`**。未注入 `RoomChat` 实现时（例如部分测试）聊天接口返回 **503**。
 - 可选环境变量（均有默认值，见 `internal/config`）：`CHAT_STREAM_MAXLEN`、`CHAT_ABLY_PUBLISH_RETRY`、`CHAT_ABLY_PUBLISH_TOTAL_TIMEOUT`、`CHAT_ABLY_PENDING_MAX`、`CHAT_MAX_PAYLOAD_BYTES`、`CHAT_MAX_TEXT_RUNES`、`CHAT_RATE_PER_SECOND`。
 - `RATE_LIMITED`（HTTP 429）：验证码发送过频、每日上限、IP 限流等；部分响应带 `Retry-After` 头（秒）。
 - `PAYLOAD_TOO_LARGE`（HTTP 413）：聊天正文或序列化消息体超过上限。
@@ -104,7 +104,7 @@ docker compose up -d --build
 - `cmd/server` 程序入口
 - `internal/api` 路由与 handler
 - `internal/store` 存储抽象与实现（postgres）
-- `internal/cache` 缓存抽象与实现（memory/redis）
+- `internal/cache` 缓存抽象与实现（进程内 memory 包仅用于测试；生产仅 **redis**）
 - `internal/realtime` Ably JWT（客户端）与房间消息发布（REST）
 - `internal/capabilities` 能力探测（当前已精简，适配无服务端下载场景）
 - `pkg` 通用工具

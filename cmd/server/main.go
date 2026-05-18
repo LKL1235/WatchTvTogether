@@ -15,7 +15,6 @@ import (
 
 	"watchtogether/internal/api"
 	"watchtogether/internal/cache"
-	"watchtogether/internal/cache/memory"
 	rediscache "watchtogether/internal/cache/redis"
 	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
@@ -78,12 +77,7 @@ func run() error {
 	}
 
 	emailSender := email.NewSender(cfg)
-	var emailCodes *emailcode.Store
-	if ca.redis != nil {
-		emailCodes = emailcode.NewStore(ca.redis)
-	} else {
-		emailCodes = emailcode.NewStore(nil)
-	}
+	emailCodes := emailcode.NewStore(ca.redis)
 
 	router := api.NewRouter(api.Dependencies{
 		Config:         cfg,
@@ -148,36 +142,26 @@ func newStores(cfg config.Config) (*stores, error) {
 }
 
 func newCaches(cfg config.Config) (*caches, error) {
-	switch cfg.CacheBackend {
-	case "memory":
-		return &caches{
-			sessions:     memory.NewSessionCache(),
-			roomStates:   memory.NewRoomStateCache(),
-			roomPresence: memory.NewRoomPresence(),
-			roomAccess:   memory.NewRoomAccess(),
-			pubsub:       memory.NewPubSub(),
-		}, nil
-	case "redis":
-		client, err := rediscache.NewClient(cfg.RedisAddr, cfg.RedisURL)
-		if err != nil {
-			return nil, err
-		}
-		if err := client.Ping(context.Background()).Err(); err != nil {
-			_ = client.Close()
-			return nil, err
-		}
-		return &caches{
-			close:        client.Close,
-			redis:        client,
-			sessions:     rediscache.NewSessionCache(client),
-			roomStates:   rediscache.NewRoomStateCache(client),
-			roomPresence: rediscache.NewRoomPresence(client),
-			roomAccess:   rediscache.NewRoomAccess(client),
-			pubsub:       rediscache.NewPubSub(client),
-		}, nil
-	default:
-		return nil, errors.New("unsupported cache backend: " + cfg.CacheBackend)
+	if cfg.CacheBackend != config.CacheBackendRedis {
+		return nil, errors.New("unsupported cache backend: " + cfg.CacheBackend + " (only redis is supported)")
 	}
+	client, err := rediscache.NewClient(cfg.RedisAddr, cfg.RedisURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	return &caches{
+		close:        client.Close,
+		redis:        client,
+		sessions:     rediscache.NewSessionCache(client),
+		roomStates:   rediscache.NewRoomStateCache(client),
+		roomPresence: rediscache.NewRoomPresence(client),
+		roomAccess:   rediscache.NewRoomAccess(client),
+		pubsub:       rediscache.NewPubSub(client),
+	}, nil
 }
 
 func roomChatFromCaches(ca *caches) cache.RoomChat {

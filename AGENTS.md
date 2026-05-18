@@ -6,7 +6,7 @@ This workspace has two repos: **WatchTvTogether** (Go backend) and **WatchTvToge
 
 ### Backend (WatchTvTogether)
 
-- **Tech**: Go 1.25, Gin, PostgreSQL 15, in-memory cache (default), Ably for realtime.
+- **Tech**: Go 1.25, Gin, PostgreSQL 15, Redis 缓存（唯一后端）, Ably for realtime.
 - **Run**: `POSTGRES_DSN="postgres://watchtogether:watchtogether@localhost:5432/watchtogether?sslmode=disable" ABLY_ROOT_KEY="devapp.devkey:devsecret" go run ./cmd/server` — listens on `:8080`.
 - **Ably key is required** to start the server. Use a dummy key (`devapp.devkey:devsecret`) for local dev; realtime sync won't work but all other features function normally.
 - **Schema note**: `internal/store/postgres/schema.sql` is missing the `email` column on `users`. Run `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';` after the app auto-creates the schema, or the `GetByEmail` queries will fail.

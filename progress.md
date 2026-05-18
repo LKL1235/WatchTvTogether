@@ -1,7 +1,33 @@
 # Progress Log
 
-- 已创建 task_plan / findings；开始编码后端与前端。
-- 后端：`RoomChat` Redis Stream、`room.SendChat`/`ListChat`、`POST/GET /api/rooms/:id/chat`、`apierr` 413/503、`CloseRoom` 清理、30s 全局 pending 扫描、`go vet`/`go build` 通过。
-- 前端：`room.chat` 订阅、`fetchRoomChatHistory`/`postRoomChat`、RoomView 侧栏聊天 UI、`vue-tsc` 与 vitest 通过。
-- 文档：根 README、`.env.example`、Web README 已同步。
-- PR：https://github.com/LKL1235/WatchTvTogether/pull/37 ；前端 https://github.com/LKL1235/WatchTvTogether-Web/pull/24
+## Session: 2026-05-18 — Issue #38 移除 memory 缓存后端
+
+### Phase 1: Discovery
+
+- **Status:** complete
+- 已阅读 Issue #38；检索 `cache_backend`、`internal/cache/memory`、`cmd/server/main.go`。
+
+### Phase 2–3: Implementation
+
+- **Status:** complete
+- 移除 `newCaches` 的 memory 分支；`config` 仅接受 `redis`；默认与 `config.yaml` 改为 redis；README、AGENTS、设计文档与接口注释同步；新增拒绝 `CACHE_BACKEND=memory` 的测试。
+
+### Phase 4: Verification
+
+- **Status:** complete
+
+## Test Results
+
+| Test | Command | Expected | Actual | Status |
+|------|---------|----------|--------|--------|
+| test | `go test ./...` | 全部通过 | 通过 | ✓ |
+| vet | `go vet ./...` | 无错误 | 无错误 | ✓ |
+| build | `go build ./...` | 成功 | 成功 | ✓ |
+
+## 5-Question Reboot Check
+
+| Question | Answer |
+|----------|--------|
+| Where am I? | Issue #38 已完成实现与验证 |
+| What's the goal? | 移除 memory 类型缓存后端配置与运行时路径 |
+| What have I learned? | 见 findings.md |

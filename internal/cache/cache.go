@@ -28,7 +28,7 @@ type PubSub interface {
 }
 
 // RoomChat persists room chat messages in Redis Streams (see docs/room_chat_realtime_design_zh.md).
-// Implementations exist only for Redis cache_backend; when nil, chat HTTP APIs return 503.
+// Production wiring uses Redis; when RoomChat is nil (e.g. some tests), chat HTTP APIs return 503.
 type RoomChat interface {
 	PendingCount(ctx context.Context, roomID string) (int64, error)
 	NextSeq(ctx context.Context, roomID string) (int64, error)
