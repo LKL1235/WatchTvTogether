@@ -42,7 +42,7 @@ func TestRunEmptyRoomCleanupRemovesDBOnlyEmptyRoom(t *testing.T) {
 	presence := memory.NewRoomPresence()
 	access := memory.NewRoomAccess()
 	rs := &memRooms{rooms: make(map[string]*model.Room)}
-	svc := NewService(states, presence, rs, nil, access, nil)
+	svc := NewService(states, presence, rs, nil, access, nil, nil, ChatLimits{})
 
 	rid := uuid.NewString()
 	rs.rooms[rid] = &model.Room{ID: rid, Name: "ghost"}
@@ -64,7 +64,7 @@ func TestRunEmptyRoomCleanupDeletesPending(t *testing.T) {
 	states := memory.NewRoomStateCache()
 	presence := memory.NewRoomPresence()
 	rs := &memRooms{rooms: make(map[string]*model.Room)}
-	svc := NewService(states, presence, rs, nil, nil, nil)
+	svc := NewService(states, presence, rs, nil, nil, nil, nil, ChatLimits{})
 
 	rid := uuid.NewString()
 	rs.rooms[rid] = &model.Room{ID: rid, Name: "x"}

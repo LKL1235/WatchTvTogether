@@ -72,6 +72,8 @@ docker compose up -d --build
 - `GET /api/rooms/:roomId`
 - `POST /api/rooms/:roomId/join`
 - `POST /api/rooms/:roomId/snapshot`
+- `GET /api/rooms/:roomId/chat`（查询参数：`before_id` 可选游标、`limit` 默认 50 最大 200；私有房可带 `password`）
+- `POST /api/rooms/:roomId/chat`（JSON：`text` 必填；私有房可带 `password`；响应含 `message` 与 `realtime`: `ok` | `deferred`）
 - `POST /api/rooms/:roomId/control`
 - `POST /api/ably/token`（返回 Ably 用 JWT：`token`、`expires_at` RFC3339）
 - `GET /api/rooms/:roomId/state`
@@ -85,7 +87,11 @@ docker compose up -d --build
 
 ### 错误码补充
 
+- 房间实时聊天依赖 **`CACHE_BACKEND=redis`**：消息仅存 **Redis Stream**（与房间生命周期一致，随房间关闭清理），经服务端 **Ably REST** 向同一控制频道发布 **`room.chat`**。`memory` 缓存模式下聊天接口返回 **503**。
+- 可选环境变量（均有默认值，见 `internal/config`）：`CHAT_STREAM_MAXLEN`、`CHAT_ABLY_PUBLISH_RETRY`、`CHAT_ABLY_PUBLISH_TOTAL_TIMEOUT`、`CHAT_ABLY_PENDING_MAX`、`CHAT_MAX_PAYLOAD_BYTES`、`CHAT_MAX_TEXT_RUNES`、`CHAT_RATE_PER_SECOND`。
 - `RATE_LIMITED`（HTTP 429）：验证码发送过频、每日上限、IP 限流等；部分响应带 `Retry-After` 头（秒）。
+- `PAYLOAD_TOO_LARGE`（HTTP 413）：聊天正文或序列化消息体超过上限。
+- `SERVICE_UNAVAILABLE`（HTTP 503）：聊天依赖 Redis 未启用、或 Ably 待投递队列已满等。
 - 验证码相关文案见 API 错误 `message`（过期、错误、尝试过多等）。
 
 ## CI/CD

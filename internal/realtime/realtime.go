@@ -11,6 +11,7 @@ const (
 	MessageRoomEvent    = "room.event"
 	MessageRoomError    = "room.error"
 	MessageRoomControl  = "room.control"
+	MessageRoomChat     = "room.chat"
 )
 
 type Publisher interface {

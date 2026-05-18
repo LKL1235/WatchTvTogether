@@ -19,6 +19,7 @@ var ErrStaleControl = errors.New("stale control version")
 type User struct {
 	ID       string         `json:"id"`
 	Username string         `json:"username"`
+	Nickname string         `json:"nickname,omitempty"`
 	Role     model.UserRole `json:"role"`
 	IsOwner  bool           `json:"is_owner"`
 }
@@ -56,10 +57,12 @@ type Service struct {
 	videos     store.VideoStore
 	roomAccess cache.RoomAccessCache
 	publisher  Publisher
+	roomChat   cache.RoomChat
+	chat       ChatLimits
 	now        func() time.Time
 }
 
-func NewService(states cache.RoomStateCache, presence cache.RoomPresence, rooms store.RoomStore, videos store.VideoStore, roomAccess cache.RoomAccessCache, publisher Publisher) *Service {
+func NewService(states cache.RoomStateCache, presence cache.RoomPresence, rooms store.RoomStore, videos store.VideoStore, roomAccess cache.RoomAccessCache, publisher Publisher, roomChat cache.RoomChat, chat ChatLimits) *Service {
 	return &Service{
 		states:     states,
 		presence:   presence,
@@ -67,6 +70,8 @@ func NewService(states cache.RoomStateCache, presence cache.RoomPresence, rooms 
 		videos:     videos,
 		roomAccess: roomAccess,
 		publisher:  publisher,
+		roomChat:   roomChat,
+		chat:       chat,
 		now:        time.Now,
 	}
 }
@@ -305,6 +310,7 @@ func (s *Service) CloseRoom(ctx context.Context, roomID string, user *User) erro
 	if s.roomAccess != nil {
 		_ = s.roomAccess.DeleteRoomAccess(ctx, roomID)
 	}
+	s.deleteRoomChat(ctx, roomID)
 	return s.PublishRoomEvent(ctx, roomID, "room_closed", user)
 }
 
@@ -353,6 +359,7 @@ func (s *Service) MaybeRunGlobalCleanup(ctx context.Context) error {
 	if err := s.RunEmptyRoomCleanup(ctx); err != nil {
 		return err
 	}
+	_ = s.ProcessGlobalChatPending(ctx)
 	return s.presence.SetLastRoomCleanupAt(ctx, s.now().UTC())
 }
 
@@ -427,6 +434,7 @@ func (s *Service) closeEmptyRoom(ctx context.Context, roomID string) error {
 	if s.roomAccess != nil {
 		_ = s.roomAccess.DeleteRoomAccess(ctx, roomID)
 	}
+	s.deleteRoomChat(ctx, roomID)
 	return s.PublishRoomEvent(ctx, roomID, "room_closed", nil)
 }
 

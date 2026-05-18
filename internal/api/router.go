@@ -34,6 +34,7 @@ type Dependencies struct {
 	RoomPresence   cache.RoomPresence
 	RoomAccess     cache.RoomAccessCache
 	PubSub         cache.PubSub
+	RoomChat       cache.RoomChat
 	Realtime       realtime.Service
 	Capabilities   capabilities.Report
 }
@@ -59,7 +60,18 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	router.StaticFS("/static/posters", http.Dir(deps.Config.PosterDir))
 
 	authService := auth.NewService(deps.UserStore, deps.SessionCache, deps.EmailCodes, deps.Config)
-	rooms := roomhub.NewService(deps.RoomStateCache, deps.RoomPresence, deps.RoomStore, deps.VideoStore, deps.RoomAccess, deps.Realtime)
+	rooms := roomhub.NewService(deps.RoomStateCache, deps.RoomPresence, deps.RoomStore, deps.VideoStore, deps.RoomAccess, deps.Realtime, deps.RoomChat, roomhub.ChatLimitsFromConfig(deps.Config))
+	if deps.RoomChat != nil && deps.Realtime != nil {
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				bg, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				_ = rooms.ProcessGlobalChatPending(bg)
+				cancel()
+			}
+		}()
+	}
 	authService.SetAfterLogin(func(ctx context.Context) error {
 		go func() {
 			bg, cancel := context.WithTimeout(context.Background(), 5*time.Minute)

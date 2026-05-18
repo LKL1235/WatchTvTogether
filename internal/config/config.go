@@ -52,6 +52,16 @@ type Config struct {
 	EmailCodeSendIntervalRaw string        `yaml:"email_code_send_interval"`
 	EmailCodeDailyLimit      int           `yaml:"email_code_daily_limit"`
 	EmailCodeMaxAttempts     int           `yaml:"email_code_max_attempts"`
+
+	// Room chat (Redis Stream + Ably); see docs/room_chat_realtime_design_zh.md
+	ChatStreamMaxLen              int    `yaml:"chat_stream_max_len"`
+	ChatAblyPublishRetry          int    `yaml:"chat_ably_publish_retry"`
+	ChatAblyPublishTimeoutRaw     string `yaml:"chat_ably_publish_timeout"`
+	ChatAblyPublishTimeout        time.Duration `yaml:"-"`
+	ChatAblyPendingMax            int    `yaml:"chat_ably_pending_max"`
+	ChatMaxPayloadBytes           int    `yaml:"chat_max_payload_bytes"`
+	ChatMaxTextRunes              int    `yaml:"chat_max_text_runes"`
+	ChatRatePerSecond             int    `yaml:"chat_rate_per_second"`
 }
 
 func Default() Config {
@@ -75,6 +85,13 @@ func Default() Config {
 		EmailCodeSendIntervalRaw: "60s",
 		EmailCodeDailyLimit:      5,
 		EmailCodeMaxAttempts:     5,
+		ChatStreamMaxLen:         2000,
+		ChatAblyPublishRetry:     2,
+		ChatAblyPublishTimeoutRaw: "10s",
+		ChatAblyPendingMax:       500,
+		ChatMaxPayloadBytes:      61440,
+		ChatMaxTextRunes:         2000,
+		ChatRatePerSecond:        10,
 	}
 }
 
@@ -148,6 +165,13 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.EmailCodeSendIntervalRaw, "EMAIL_CODE_SEND_INTERVAL")
 	setInt(&cfg.EmailCodeDailyLimit, "EMAIL_CODE_DAILY_LIMIT")
 	setInt(&cfg.EmailCodeMaxAttempts, "EMAIL_CODE_MAX_ATTEMPTS")
+	setInt(&cfg.ChatStreamMaxLen, "CHAT_STREAM_MAXLEN")
+	setInt(&cfg.ChatAblyPublishRetry, "CHAT_ABLY_PUBLISH_RETRY")
+	setString(&cfg.ChatAblyPublishTimeoutRaw, "CHAT_ABLY_PUBLISH_TOTAL_TIMEOUT")
+	setInt(&cfg.ChatAblyPendingMax, "CHAT_ABLY_PENDING_MAX")
+	setInt(&cfg.ChatMaxPayloadBytes, "CHAT_MAX_PAYLOAD_BYTES")
+	setInt(&cfg.ChatMaxTextRunes, "CHAT_MAX_TEXT_RUNES")
+	setInt(&cfg.ChatRatePerSecond, "CHAT_RATE_PER_SECOND")
 	if v := strings.TrimSpace(os.Getenv("CORS_ORIGINS")); v != "" {
 		cfg.CorsOrigins = splitCSV(v)
 	}
@@ -262,6 +286,35 @@ func (c *Config) normalize() error {
 	c.AblyChannelPrefix = strings.TrimSpace(c.AblyChannelPrefix)
 	if c.AblyChannelPrefix == "" {
 		c.AblyChannelPrefix = "watchtogether"
+	}
+	if c.ChatStreamMaxLen <= 0 {
+		c.ChatStreamMaxLen = 2000
+	}
+	if c.ChatAblyPublishRetry < 0 {
+		c.ChatAblyPublishRetry = 0
+	}
+	if strings.TrimSpace(c.ChatAblyPublishTimeoutRaw) == "" {
+		c.ChatAblyPublishTimeoutRaw = "10s"
+	}
+	chatPubTO, err := parseDuration(c.ChatAblyPublishTimeoutRaw)
+	if err != nil {
+		return fmt.Errorf("chat_ably_publish_timeout: %w", err)
+	}
+	if chatPubTO <= 0 {
+		return errors.New("chat_ably_publish_timeout must be greater than 0")
+	}
+	c.ChatAblyPublishTimeout = chatPubTO
+	if c.ChatAblyPendingMax <= 0 {
+		c.ChatAblyPendingMax = 500
+	}
+	if c.ChatMaxPayloadBytes <= 0 {
+		c.ChatMaxPayloadBytes = 61440
+	}
+	if c.ChatMaxTextRunes <= 0 {
+		c.ChatMaxTextRunes = 2000
+	}
+	if c.ChatRatePerSecond <= 0 {
+		c.ChatRatePerSecond = 10
 	}
 	return nil
 }

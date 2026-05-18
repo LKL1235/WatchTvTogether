@@ -61,6 +61,7 @@ func testDeps(stores *memoryStores) Dependencies {
 		RoomPresence:   memory.NewRoomPresence(),
 		RoomAccess:     memory.NewRoomAccess(),
 		PubSub:         memory.NewPubSub(),
+		RoomChat:       nil,
 	}
 }
 

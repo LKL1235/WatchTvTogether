@@ -97,6 +97,7 @@ func run() error {
 		RoomPresence:   ca.roomPresence,
 		RoomAccess:     ca.roomAccess,
 		PubSub:         ca.pubsub,
+		RoomChat:       roomChatFromCaches(ca),
 		Realtime:       realtime,
 		Capabilities:   caps,
 	})
@@ -177,4 +178,11 @@ func newCaches(cfg config.Config) (*caches, error) {
 	default:
 		return nil, errors.New("unsupported cache backend: " + cfg.CacheBackend)
 	}
+}
+
+func roomChatFromCaches(ca *caches) cache.RoomChat {
+	if ca.redis != nil {
+		return rediscache.NewRoomChat(ca.redis)
+	}
+	return nil
 }

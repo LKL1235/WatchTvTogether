@@ -89,6 +89,8 @@ func registerRoomRoutes(router *gin.Engine, deps Dependencies, authService *auth
 	api.GET("/rooms/:roomId/state", h.state)
 	api.POST("/rooms/:roomId/control", h.control)
 	api.POST("/rooms/:roomId/snapshot", h.snapshot)
+	api.POST("/rooms/:roomId/chat", h.postRoomChat)
+	api.GET("/rooms/:roomId/chat", h.listRoomChat)
 }
 
 func (h *roomHandler) create(c *gin.Context) {
@@ -390,6 +392,89 @@ func (h *roomHandler) snapshot(c *gin.Context) {
 			Channel:       channel,
 			TokenEndpoint: "/api/ably/token",
 		},
+	})
+}
+
+type postRoomChatRequest struct {
+	Text     string `json:"text"`
+	Password string `json:"password"`
+}
+
+func (h *roomHandler) postRoomChat(c *gin.Context) {
+	room, ok := h.loadRoom(c)
+	if !ok {
+		return
+	}
+	var req postRoomChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		apierr.Abort(c, apierr.InvalidRequest("invalid JSON body"))
+		return
+	}
+	if !h.canAccessRoom(c, room, currentClaims(c).UserID, req.Password) {
+		apierr.Abort(c, apierr.Forbidden("invalid room password"))
+		return
+	}
+	claims := currentUser(c)
+	if claims == nil {
+		apierr.Abort(c, apierr.Unauthorized("authentication required"))
+		return
+	}
+	u, err := h.deps.UserStore.GetByID(c.Request.Context(), claims.UserID)
+	if err != nil {
+		respondStoreError(c, err)
+		return
+	}
+	hubUser := roomUserFromClaims(claims, room)
+	if u != nil {
+		hubUser.Nickname = u.Nickname
+	}
+	res, err := h.rooms.SendChat(c.Request.Context(), room.ID, hubUser, req.Text)
+	if err != nil {
+		switch {
+		case errors.Is(err, roomhub.ErrChatRequiresRedis), errors.Is(err, roomhub.ErrChatPendingFull):
+			apierr.Abort(c, apierr.ServiceUnavailable("chat temporarily unavailable"))
+			return
+		case errors.Is(err, roomhub.ErrChatTextEmpty):
+			apierr.Abort(c, apierr.InvalidRequest("chat text is required"))
+			return
+		case errors.Is(err, roomhub.ErrChatTextTooLong), errors.Is(err, roomhub.ErrChatPayloadTooLarge):
+			apierr.Abort(c, apierr.PayloadTooLarge("message too long"))
+			return
+		case errors.Is(err, roomhub.ErrChatRateLimited):
+			apierr.Abort(c, apierr.TooManyRequests("too many chat messages"))
+			return
+		default:
+			respondStoreError(c, err)
+			return
+		}
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+func (h *roomHandler) listRoomChat(c *gin.Context) {
+	room, ok := h.loadRoom(c)
+	if !ok {
+		return
+	}
+	pwd := strings.TrimSpace(c.Query("password"))
+	if !h.canAccessRoom(c, room, currentClaims(c).UserID, pwd) {
+		apierr.Abort(c, apierr.Forbidden("invalid room password"))
+		return
+	}
+	limit := parseInt(c.Query("limit"), 50)
+	beforeID := strings.TrimSpace(c.Query("before_id"))
+	items, hasMore, err := h.rooms.ListChat(c.Request.Context(), room.ID, beforeID, limit)
+	if err != nil {
+		if errors.Is(err, roomhub.ErrChatRequiresRedis) {
+			apierr.Abort(c, apierr.ServiceUnavailable("chat temporarily unavailable"))
+			return
+		}
+		respondStoreError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"items":    items,
+		"has_more": hasMore,
 	})
 }
 
