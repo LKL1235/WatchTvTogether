@@ -24,6 +24,8 @@
 | vet | `go vet ./...` | 无错误 | 无错误 | ✓ |
 | build | `go build ./...` | 成功 | 成功 | ✓ |
 
+交付：PR https://github.com/LKL1235/WatchTvTogether/pull/39
+
 ## 5-Question Reboot Check
 
 | Question | Answer |

@@ -33,7 +33,7 @@ Phase 5 — Delivery
 
 ### Phase 5: Delivery
 
-- [x] commit、push、PR
+- [x] commit、push、PR https://github.com/LKL1235/WatchTvTogether/pull/39
 - **Status:** complete
 
 ## Decisions Made (#38)
