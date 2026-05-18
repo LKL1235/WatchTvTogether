@@ -10,13 +10,15 @@ import (
 type Code string
 
 const (
-	CodeInvalidRequest Code = "INVALID_REQUEST"
-	CodeUnauthorized   Code = "UNAUTHORIZED"
-	CodeForbidden      Code = "FORBIDDEN"
-	CodeNotFound       Code = "NOT_FOUND"
-	CodeConflict       Code = "CONFLICT"
-	CodeRateLimited    Code = "RATE_LIMITED"
-	CodeInternal       Code = "INTERNAL_ERROR"
+	CodeInvalidRequest     Code = "INVALID_REQUEST"
+	CodeUnauthorized       Code = "UNAUTHORIZED"
+	CodeForbidden          Code = "FORBIDDEN"
+	CodeNotFound           Code = "NOT_FOUND"
+	CodeConflict           Code = "CONFLICT"
+	CodeRateLimited        Code = "RATE_LIMITED"
+	CodeInternal           Code = "INTERNAL_ERROR"
+	CodePayloadTooLarge    Code = "PAYLOAD_TOO_LARGE"
+	CodeServiceUnavailable Code = "SERVICE_UNAVAILABLE"
 )
 
 type Error struct {
@@ -59,6 +61,14 @@ func TooManyRequests(message string) *Error {
 
 func Internal(message string) *Error {
 	return New(http.StatusInternalServerError, CodeInternal, message)
+}
+
+func PayloadTooLarge(message string) *Error {
+	return New(http.StatusRequestEntityTooLarge, CodePayloadTooLarge, message)
+}
+
+func ServiceUnavailable(message string) *Error {
+	return New(http.StatusServiceUnavailable, CodeServiceUnavailable, message)
 }
 
 func Respond(c *gin.Context, err error) {

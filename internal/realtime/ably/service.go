@@ -20,6 +20,7 @@ const (
 	MessageNameEvent    = "room.event"
 	MessageNameError    = "room.error"
 	MessageNameControl  = "room.control"
+	MessageNameChat     = "room.chat"
 )
 
 var ErrRootKeyRequired = errors.New("ably root key is required")
