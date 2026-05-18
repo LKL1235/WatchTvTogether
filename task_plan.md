@@ -34,8 +34,8 @@ Phase 5 — Delivery
 
 ### Phase 5: Delivery
 
-- [ ] README 可见变更、git commit/push、PR
-- **Status:** in_progress
+- [x] README 可见变更、git commit/push、PR（#37 / Web #24）
+- **Status:** complete
 
 ## Decisions Made
 
