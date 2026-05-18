@@ -100,7 +100,9 @@ sequenceDiagram
 1. **发送** `POST /api/rooms/:roomId/chat`  
    - Body：`{ "text": "..." }`  
    - 响应：完整消息对象 + `seq` + `stream_id`；可选 `realtime: "ok" | "deferred"`（见 §5.3，表示同步推送是否已确认成功）。  
-   - 错误：`400` 长度/内容、`401`、`403`、`429` 限流。
+   - 错误：`400` 内容不合法；**正文过长**时返回 `413 Payload Too Large`（或带明确 `code` 的 `400`，二选一并写进 API 契约），**客户端须提示「消息过长」**（可与输入框 `maxlength` / 实时字数提示配合）。  
+   - 当 **pending 达上限或服务降级**（见 §12）时返回 `503`（或项目统一的业务码），**客户端提示「聊天服务暂不可用，请稍后再试」**。  
+   - 其它：`401`、`403`、`429` 限流。
 
 2. **历史** `GET /api/rooms/:roomId/chat?before_id=&limit=`  
    - 推荐使用 **Stream ID** 作为游标：`before_id` 表示「比该 ID 更早」的消息（配合 `XREVRANGE` 从新到旧拉页）。也可用 `before_seq` 若实现层建立 secondary 索引；MVP 用 `before_id` 最直接。  
@@ -140,15 +142,16 @@ sequenceDiagram
 #### 阶段 1 — 请求内同步重试（必选基线）
 
 - `XADD` 成功后调用 Ably REST `Publish`。  
-- 对**可重试错误**（超时、5xx、网络抖动）做 **有限次数** 重试：例如 3～5 次，**指数退避 + 抖动**，单次请求总耗时设上限（避免阻塞 worker）。  
-- 每次重试使用**相同** `stream_id` / `seq` / JSON 载荷，Ably 侧天然可去重（客户端按 `seq` 去重即可）。  
-- 若在时限内成功：HTTP 响应 `realtime: "ok"`（或省略）。
+- 对**可重试错误**（超时、5xx、网络抖动）：**首次调用失败后最多再重试 2 次**（即 Publish 合计最多 **3 次**尝试）；重试间隔可用**指数退避 + 抖动**，且整段「Publish + 全部重试」须在 **`10s` 总超时**内结束（建议用 `context.WithTimeout` 或累计计时，超时则停止重试并进入阶段 2 或返回 `deferred`）。  
+- 每次尝试使用**相同** `stream_id` / `seq` / JSON 载荷；客户端按 `seq` 去重即可。  
+- 若在 10s 内某次尝试成功：HTTP 响应 `realtime: "ok"`（或省略）。
 
 #### 阶段 2 — Redis 待投递索引（可选，用于「重试耗尽仍失败」）
 
-- 当同步重试仍失败：将 `stream_id`（或 `room_id`+`seq`）写入辅助结构，例如：  
+- 当同步重试在 **10s** 内仍失败：将 `stream_id`（或 `room_id`+`seq`）写入辅助结构，例如：  
   - `ZADD {prefix}:room:{roomId}:chat:ably_pending {unix_deadline} {stream_id}`  
   - 或使用 **Redis Stream** 作为 outbox：`XADD ...:chat:outbox * room_id ... stream_id ...`（与主 Stream 二选一即可，避免过多类型）。  
+- **`XADD` 之前**检查 `ZCARD(pending) < CHAT_ABLY_PENDING_MAX`；否则 **503**（见 §12），**本条不写入 Stream**，避免「已落库却长期无法推送」的无界堆积。若 `XADD` 与入队之间存在并发竞态，实现上可用 **Lua 脚本 / 事务** 将「写 Stream → Publish → 入 pending」中的关键步打包，或在入队失败时记录告警并依赖后台对 Stream 尾部的补偿扫描（实现阶段再定）。  
 - 后台 **单飞定时任务**（或每实例带分布式锁的低频扫描）：对 pending 中到期项再次 `Publish`，成功则 `ZREM`。  
 - HTTP 响应可返回 `realtime: "deferred"`，前端可提示「消息已保存，实时推送可能略有延迟」；列表仍以 HTTP/后续 Ably 为准。
 
@@ -178,7 +181,7 @@ sequenceDiagram
 
 **限流**：每用户每房间每秒 N 条；可用 Redis `INCR` + 过期。
 
-**内容安全**：最大长度、Unicode 规范化、前端转义展示。
+**内容安全**：最大长度（与 §12 Ably/HTTP 上限一致）、Unicode 规范化、前端转义展示。
 
 ---
 
@@ -198,7 +201,9 @@ sequenceDiagram
 
 ### 8.2 发送
 
-- `postRoomChat`；若响应 `realtime: "deferred"`，可做轻量提示。  
+- `postRoomChat`；若响应 `realtime: "deferred"`，可做轻量提示（如「已发送，实时推送可能略有延迟」）。  
+- **`413` / 消息过长**：输入框旁或 toast **明确提示「消息过长」**；发送前可用与后端一致的 `text` 最大长度做本地校验，减少无效请求。  
+- **`503` / 聊天服务不可用**（pending 堆积触顶或服务主动降级）：**提示「聊天服务暂不可用，请稍后再试」**，可禁用发送按钮直至退避后重试或收到健康信号。  
 - 以服务端返回的 `seq` / `stream_id` 为准，避免与 Ably 乱序冲突。
 
 ### 8.3 房间关闭
@@ -231,15 +236,20 @@ sequenceDiagram
 2. **HTTP POST/GET** + Ably Publish + **同步重试**。  
 3. **（可选）** pending ZSET + 后台补发协程。  
 4. **前端** 订阅与 UI。  
-5. 限流、README、环境变量（`CHAT_STREAM_MAXLEN`、`CHAT_ABLY_MAX_RETRIES` 等）。
+5. 限流、README、环境变量（示例：`CHAT_STREAM_MAXLEN`、`CHAT_ABLY_PUBLISH_RETRY=2`（失败后再试次数）、`CHAT_ABLY_PUBLISH_TOTAL_TIMEOUT=10s`、`CHAT_ABLY_PENDING_MAX`（每房间 pending 上限））。
 
 ---
 
 ## 12. 风险与待决问题
 
-- **Ably 消息大小**：单条 JSON 低于平台限制；超长拒绝或截断。  
-- **请求延迟**：同步重试会增加 POST 尾延迟，需上限与超时。  
-- **pending 堆积**：Ably 长时间不可用时 ZSET 增长，需监控 + 上限策略（例如超过 M 条拒绝新消息或仅允许 deferred）。
+- **Ably 消息大小**：单条 **序列化后 JSON 字节数**须低于 Ably 对消息体的大小限制（以官方文档为准）。服务端在 `XADD` 前校验；**超长一律拒绝，不允许静默截断**（避免语义半截）。HTTP 返回 `413`（或约定业务码）；**客户端必须提示「消息过长」**（见 §4.2、§8.2）。可同时限制 UTF-8 字符数或码点数以改善 UX。  
+- **请求延迟**：同步重试会拉长 POST 尾部耗时；已定稿：**Publish 失败后再重试至多 2 次**，且 **Publish 整段（含重试）总超时 10s**；到期仍未成功则停止同步重试，转入 pending（若启用）并返回 `realtime: "deferred"`。  
+- **pending 堆积（最佳实践）**：Ably 长时间不可用时 `ably_pending`（如 ZSET）会增长。建议：  
+  1. **每房间 pending 条数上限** `CHAT_ABLY_PENDING_MAX`：在 **`XADD` 之前** 检查 `ZCARD`（见 §5.3），达上限则对新 `POST /chat` 返回 **`503`**，**客户端提示「聊天服务暂不可用，请稍后再试」**；禁止在无界堆积时仍对「新发言」返回 `200`。  
+  2. **指标与告警**：pending 深度、10s 内 Publish 失败率、`503` 触发次数接入监控。  
+  3. **客户端**：收到 `503`（或约定错误码）时 **提示「聊天服务暂不可用，请稍后再试」**，并短暂禁用发送或退避重试，避免打爆已过载路径。  
+  4. **恢复**：后台补发成功使 pending 下降后自动恢复 `200`；可选 `GET /api/rooms/:id/chat/health` 或由 `503` 的 `Retry-After` 引导客户端。  
+  5. **不**建议在无界堆积时仍返回 `200` 仅 `deferred`——否则用户误以为聊天正常，实际实时面长期瘫痪。
 
 ---
 
