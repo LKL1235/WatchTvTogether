@@ -13,7 +13,6 @@ import (
 
 const (
 	StorageBackendPostgres = "postgres"
-	CacheBackendMemory     = "memory"
 	CacheBackendRedis      = "redis"
 )
 
@@ -69,7 +68,7 @@ func Default() Config {
 		Addr:                     ":8080",
 		StorageBackend:           StorageBackendPostgres,
 		PostgresDSN:              "postgres://user:pass@localhost:5432/watchtogether?sslmode=disable",
-		CacheBackend:             CacheBackendMemory,
+		CacheBackend:             CacheBackendRedis,
 		RedisAddr:                "localhost:6379",
 		JWTSecret:                "change-me-in-production",
 		JWTAccessTTLRaw:          "15m",
@@ -211,9 +210,9 @@ func (c *Config) normalize() error {
 		return fmt.Errorf("unsupported storage_backend %q", c.StorageBackend)
 	}
 	switch c.CacheBackend {
-	case CacheBackendMemory, CacheBackendRedis:
+	case CacheBackendRedis:
 	default:
-		return fmt.Errorf("unsupported cache_backend %q", c.CacheBackend)
+		return fmt.Errorf("unsupported cache_backend %q (only redis is supported)", c.CacheBackend)
 	}
 	accessTTL, err := parseDuration(c.JWTAccessTTLRaw)
 	if err != nil {

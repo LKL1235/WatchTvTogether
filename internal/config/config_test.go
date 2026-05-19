@@ -45,7 +45,7 @@ func TestLoad_DatabaseURLUsedWhenNoPostgresURLOrDSN(t *testing.T) {
 	}
 }
 
-func TestLoad_DefaultsToPostgresMemoryAndAblySettings(t *testing.T) {
+func TestLoad_DefaultsToPostgresRedisAndAblySettings(t *testing.T) {
 	cfg, err := config.Load("")
 	if err != nil {
 		t.Fatal(err)
@@ -53,8 +53,8 @@ func TestLoad_DefaultsToPostgresMemoryAndAblySettings(t *testing.T) {
 	if cfg.StorageBackend != config.StorageBackendPostgres {
 		t.Fatalf("storage_backend: got %q want postgres", cfg.StorageBackend)
 	}
-	if cfg.CacheBackend != config.CacheBackendMemory {
-		t.Fatalf("cache_backend: got %q want memory", cfg.CacheBackend)
+	if cfg.CacheBackend != config.CacheBackendRedis {
+		t.Fatalf("cache_backend: got %q want redis", cfg.CacheBackend)
 	}
 	if cfg.AblyTokenTTLRaw != "30m" || cfg.AblyTokenTTL <= 0 {
 		t.Fatalf("ably token ttl: raw=%q parsed=%s", cfg.AblyTokenTTLRaw, cfg.AblyTokenTTL)
@@ -89,5 +89,13 @@ func TestLoad_RejectsNonPositiveAblyTokenTTL(t *testing.T) {
 
 	if _, err := config.Load(""); err == nil {
 		t.Fatal("expected ABLY_TOKEN_TTL=0s to fail")
+	}
+}
+
+func TestLoad_RejectsMemoryCacheBackend(t *testing.T) {
+	t.Setenv("CACHE_BACKEND", "memory")
+
+	if _, err := config.Load(""); err == nil {
+		t.Fatal("expected CACHE_BACKEND=memory to be rejected")
 	}
 }

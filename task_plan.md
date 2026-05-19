@@ -1,3 +1,56 @@
+# Task Plan: GitHub #38 — 移除 memory 缓存后端（当前）
+
+## Goal
+
+移除可配置的 `cache_backend=memory` 运行时路径及相关默认与文档，仅保留 Redis；进程内 `internal/cache/memory` 保留供单元测试注入。
+
+## Current Phase
+
+Phase 5 — Delivery
+
+## Phases
+
+### Phase 1: Requirements & Discovery
+
+- [x] 阅读 Issue #38 与代码中 `memory` / `CacheBackend` 引用
+- **Status:** complete
+
+### Phase 2: Planning & Structure
+
+- [x] 方案：`newCaches` 仅 Redis；`config` 默认与校验仅 `redis`；样例 `config.yaml`；README / AGENTS / 设计文档同步
+- **Status:** complete
+
+### Phase 3: Implementation
+
+- [x] `cmd/server/main.go`、`internal/config`、`config.yaml`、注释与文档
+- [x] 新增 `TestLoad_RejectsMemoryCacheBackend`
+- **Status:** complete
+
+### Phase 4: Testing & Verification
+
+- [x] `go test ./...`、`go vet ./...`、`go build ./...`
+- **Status:** complete
+
+### Phase 5: Delivery
+
+- [x] commit、push、PR https://github.com/LKL1235/WatchTvTogether/pull/39
+- **Status:** complete
+
+## Decisions Made (#38)
+
+| Decision | Rationale |
+|----------|-----------|
+| 保留 `internal/cache/memory` 包 | 单测直接构造依赖，非生产「后端」选型 |
+| `CACHE_BACKEND=memory` 在 `normalize` 阶段报错 | 与移除支持一致，配置即失败 |
+
+## Errors Encountered (#38)
+
+| Error | Attempt | Resolution |
+|-------|---------|------------|
+|       |         |            |
+
+---
+
 # Task Plan: 房间 Redis Stream 聊天（设计文档落地）
 
 ## Goal

@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// RoomAccess is an in-memory RoomAccessCache for tests and cache_backend=memory.
+// RoomAccess is an in-memory RoomAccessCache for unit tests (not a production cache backend).
 type RoomAccess struct {
 	mu    sync.RWMutex
 	rooms map[string]map[string]struct{} // roomID -> set of userID

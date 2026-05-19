@@ -1,7 +1,7 @@
 addr: ":8080"
 storage_backend: postgres
 postgres_dsn: "postgres://user:pass@localhost:5432/watchtogether?sslmode=disable"
-cache_backend: memory
+cache_backend: redis
 redis_addr: "localhost:6379"
 jwt_secret: "change-me-in-production"
 jwt_access_ttl: "15m"

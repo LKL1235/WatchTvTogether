@@ -2,7 +2,7 @@
 
 > 面向当前代码库：`WatchTvTogether`（Go + Ably REST 发布）与 `WatchTvTogether-Web`（Vue + Ably Realtime 订阅）。  
 > 目标：与**房间控制/同步**共用同一 Ably 频道；聊天记录**仅 Redis（Stream）**、**与房间生命周期一致**、**不落盘**（不写 PostgreSQL）。  
-> **前提**：聊天功能依赖 Redis；部署使用 `cache_backend=redis`（与现有房间状态、presence 等一致），本文**不再**描述 memory 缓存后端下的聊天行为或占位实现。
+> **前提**：聊天功能依赖 Redis；`cache_backend` 仅支持 `redis`（房间状态、presence 等同理），本文不描述无 Redis 时的聊天占位行为。
 
 ---
 
