@@ -1,15 +1,24 @@
-# Findings
+# Findings: chat_design 与后端
 
-## Issue #38（移除 memory 缓存后端）
+## Web `docs/chat_design.md`
 
-- Issue: https://github.com/LKL1235/WatchTvTogether/issues/38
-- 生产路径：`cmd/server/main.go` 曾以 `cache_backend` 选择 memory/redis；现已仅 Redis。
-- 默认配置：`internal/config.Default()` 与 `config.yaml` 使用 `redis`。
-- 单测仍通过 `internal/cache/memory` 与 `testDeps` 注入内存实现，与「移除后端选型」不冲突。
+- **决策 #14**：不改 API、Ably 事件、消息结构。
+- **§11 数据流**：`GET/POST /api/rooms/:id/chat` + Ably `room.chat`。
+- 侧边栏仅为 UI/布局；宽度/折叠存 `localStorage`，**无后端接口**。
 
-## 历史：房间聊天设计
+## 后端现状（main）
 
-- 房间 JWT 无 `publish`，聊天须 HTTP + 服务端 Ably REST。
-- `NewService` 仅在 `internal/api/router.go` 与 `internal/room/hub_test.go` 调用。
-- `apierr` 需新增 413/503 以匹配设计契约。
-- `router_test` 使用 memory cache 实现类，聊天 `RoomChat` 为 nil 时期望 503；可不阻塞 CI。
+| 能力 | 位置 | 状态 |
+|------|------|------|
+| POST/GET chat | `internal/api/room_handlers.go` | 已实现 |
+| Redis Stream + pending | `internal/cache/redis/room_chat.go` | 已实现 |
+| SendChat / ListChat | `internal/room/chat.go` | 已实现 |
+| CloseRoom 删聊天 key | `hub.go` → `deleteRoomChat` | 已实现 |
+| Ably `room.chat` | `realtime/ably/service.go` | 已实现 |
+| 全局 pending 补发 | `router.go` 后台 goroutine | 已实现 |
+| 413/503/429 | `apierr` + handlers | 已实现 |
+
+## 缺口（相对 room_chat_realtime_design_zh.md §10）
+
+- 无 `room_chat` Redis 单元测试
+- 无 `SendChat`/`ListChat` 专注单元测试（hub_test 未覆盖聊天）
