@@ -26,10 +26,9 @@ import (
 )
 
 type stores struct {
-	db     *sql.DB
-	users  store.UserStore
-	rooms  store.RoomStore
-	videos store.VideoStore
+	db    *sql.DB
+	users store.UserStore
+	rooms store.RoomStore
 }
 
 type caches struct {
@@ -81,10 +80,9 @@ func run() error {
 
 	router := api.NewRouter(api.Dependencies{
 		Config:         cfg,
-		UserStore:      st.users,
-		RoomStore:      st.rooms,
-		VideoStore:     st.videos,
-		EmailSender:    emailSender,
+		UserStore:   st.users,
+		RoomStore:   st.rooms,
+		EmailSender: emailSender,
 		EmailCodes:     emailCodes,
 		SessionCache:   ca.sessions,
 		RoomStateCache: ca.roomStates,
@@ -131,10 +129,9 @@ func newStores(cfg config.Config) (*stores, error) {
 			return nil, err
 		}
 		return &stores{
-			db:     db,
-			users:  postgres.NewUserStore(db),
-			rooms:  postgres.NewRoomStore(db),
-			videos: postgres.NewVideoStore(db),
+			db:    db,
+			users: postgres.NewUserStore(db),
+			rooms: postgres.NewRoomStore(db),
 		}, nil
 	default:
 		return nil, errors.New("unsupported storage backend: " + cfg.StorageBackend)

@@ -24,10 +24,9 @@ import (
 
 type Dependencies struct {
 	Config         config.Config
-	UserStore      store.UserStore
-	RoomStore      store.RoomStore
-	VideoStore     store.VideoStore
-	EmailSender    email.SenderAPI
+	UserStore   store.UserStore
+	RoomStore   store.RoomStore
+	EmailSender email.SenderAPI
 	EmailCodes     *emailcode.Store
 	SessionCache   cache.SessionCache
 	RoomStateCache cache.RoomStateCache
@@ -56,11 +55,8 @@ func NewRouter(deps Dependencies) *gin.Engine {
 		})
 	})
 
-	router.StaticFS("/static/videos", http.Dir(deps.Config.StorageDir))
-	router.StaticFS("/static/posters", http.Dir(deps.Config.PosterDir))
-
 	authService := auth.NewService(deps.UserStore, deps.SessionCache, deps.EmailCodes, deps.Config)
-	rooms := roomhub.NewService(deps.RoomStateCache, deps.RoomPresence, deps.RoomStore, deps.VideoStore, deps.RoomAccess, deps.Realtime, deps.RoomChat, roomhub.ChatLimitsFromConfig(deps.Config))
+	rooms := roomhub.NewService(deps.RoomStateCache, deps.RoomPresence, deps.RoomStore, deps.RoomAccess, deps.Realtime, deps.RoomChat, roomhub.ChatLimitsFromConfig(deps.Config))
 	if deps.RoomChat != nil && deps.Realtime != nil {
 		go func() {
 			ticker := time.NewTicker(30 * time.Second)
@@ -86,7 +82,6 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	registerAuthRoutes(router, deps, authService)
 	registerAdminRoomRoutes(router, deps, authService, rooms)
 	registerRoomRoutes(router, deps, authService, rooms)
-	registerVideoRoutes(router, deps, authService)
 	registerDebugRoutes(router, deps, authService, rooms)
 
 	return router

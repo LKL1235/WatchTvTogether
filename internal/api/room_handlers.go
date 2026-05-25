@@ -14,6 +14,7 @@ import (
 	roomhub "watchtogether/internal/room"
 	"watchtogether/internal/store"
 	"watchtogether/pkg/apierr"
+	"watchtogether/pkg/queueurl"
 )
 
 type roomHandler struct {
@@ -51,6 +52,7 @@ type controlRoomRequest struct {
 	Queue          []string             `json:"queue"`
 	PlaybackMode   model.PlaybackMode   `json:"playback_mode"`
 	ControlVersion int64                `json:"control_version"`
+	VideoDuration  float64              `json:"video_duration,omitempty"`
 }
 
 type roomSnapshotRequest struct {
@@ -325,13 +327,20 @@ func (h *roomHandler) control(c *gin.Context) {
 		return
 	}
 	user := roomUserFromClaims(currentUser(c), room)
+	queue := cleanQueue(req.Queue)
+	videoID := strings.TrimSpace(req.VideoID)
+	if videoID != "" && !queueurl.IsPlaybackURL(videoID) {
+		apierr.Abort(c, apierr.InvalidRequest("video_id must be an http(s) or protocol-relative URL"))
+		return
+	}
 	msg, err := h.rooms.ApplyControl(c.Request.Context(), room.ID, user, roomhub.ControlInput{
-		Action:        req.Action,
-		Position:      req.Position,
-		VideoID:       strings.TrimSpace(req.VideoID),
-		Queue:         cleanQueue(req.Queue),
-		PlaybackMode:  req.PlaybackMode,
-		ClientVersion: req.ControlVersion,
+		Action:         req.Action,
+		Position:       req.Position,
+		VideoID:        videoID,
+		Queue:          queue,
+		PlaybackMode:   req.PlaybackMode,
+		ClientVersion:  req.ControlVersion,
+		VideoDuration:  req.VideoDuration,
 	})
 	if err != nil {
 		if errors.Is(err, roomhub.ErrForbidden) {
@@ -544,13 +553,7 @@ func validPlaybackAction(action model.PlaybackAction) bool {
 }
 
 func cleanQueue(queue []string) []string {
-	out := make([]string, 0, len(queue))
-	for _, item := range queue {
-		if trimmed := strings.TrimSpace(item); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
+	return queueurl.FilterPlaybackURLs(queue)
 }
 
 func parseInt(raw string, fallback int) int {
