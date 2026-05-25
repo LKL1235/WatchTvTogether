@@ -54,7 +54,6 @@ type Service struct {
 	states     cache.RoomStateCache
 	presence   cache.RoomPresence
 	rooms      store.RoomStore
-	videos     store.VideoStore
 	roomAccess cache.RoomAccessCache
 	publisher  Publisher
 	roomChat   cache.RoomChat
@@ -62,12 +61,11 @@ type Service struct {
 	now        func() time.Time
 }
 
-func NewService(states cache.RoomStateCache, presence cache.RoomPresence, rooms store.RoomStore, videos store.VideoStore, roomAccess cache.RoomAccessCache, publisher Publisher, roomChat cache.RoomChat, chat ChatLimits) *Service {
+func NewService(states cache.RoomStateCache, presence cache.RoomPresence, rooms store.RoomStore, roomAccess cache.RoomAccessCache, publisher Publisher, roomChat cache.RoomChat, chat ChatLimits) *Service {
 	return &Service{
 		states:     states,
 		presence:   presence,
 		rooms:      rooms,
-		videos:     videos,
 		roomAccess: roomAccess,
 		publisher:  publisher,
 		roomChat:   roomChat,
@@ -121,12 +119,6 @@ func (s *Service) projectState(ctx context.Context, base *model.RoomState) *mode
 	out := *base
 	baseUpdated := base.UpdatedAt
 	duration := base.VideoDuration
-	if duration <= 0 && base.VideoID != "" && s.videos != nil {
-		if v, err := s.videos.GetByID(ctx, base.VideoID); err == nil && v != nil {
-			duration = v.Duration
-			out.VideoDuration = duration
-		}
-	}
 	now := s.now().UTC()
 	pos, atEnd := ProjectedPlayback(&out, now, duration)
 	out.Position = pos
@@ -141,17 +133,23 @@ func (s *Service) projectState(ctx context.Context, base *model.RoomState) *mode
 			out.VideoID = nextID
 			out.Position = 0
 			out.Action = model.PlaybackActionPause
-			if s.videos != nil && nextID != "" {
-				if v, err := s.videos.GetByID(ctx, nextID); err == nil && v != nil {
-					out.VideoDuration = v.Duration
-				}
-			}
+			out.VideoDuration = 0
 		} else {
 			out.Action = model.PlaybackActionPause
 			out.Position = duration
 		}
 	}
 	return &out
+}
+
+func resolveControlDuration(msg ControlInput, prev *model.RoomState, videoID string) float64 {
+	if msg.VideoDuration > 0 {
+		return msg.VideoDuration
+	}
+	if prev != nil && videoID != "" && videoID == prev.VideoID && prev.VideoDuration > 0 {
+		return prev.VideoDuration
+	}
+	return 0
 }
 
 // Join adds the user to room presence; returns previous room id if the user was moved.
@@ -171,12 +169,13 @@ func (s *Service) Leave(ctx context.Context, roomID string, userID string) error
 }
 
 type ControlInput struct {
-	Action        model.PlaybackAction
-	Position      float64
-	VideoID       string
-	Queue         []string
-	PlaybackMode  model.PlaybackMode
-	ClientVersion int64
+	Action         model.PlaybackAction
+	Position       float64
+	VideoID        string
+	Queue          []string
+	PlaybackMode   model.PlaybackMode
+	ClientVersion  int64
+	VideoDuration  float64
 }
 
 func (s *Service) ApplyControl(ctx context.Context, roomID string, user User, msg ControlInput) (Message, error) {
@@ -231,12 +230,7 @@ func (s *Service) ApplyControl(ctx context.Context, roomID string, user User, ms
 		cv = prev.ControlVersion + 1
 	}
 
-	duration := 0.0
-	if videoID != "" && s.videos != nil {
-		if v, err := s.videos.GetByID(ctx, videoID); err == nil && v != nil {
-			duration = v.Duration
-		}
-	}
+	duration := resolveControlDuration(msg, prev, videoID)
 
 	state := &model.RoomState{
 		RoomID:         roomID,

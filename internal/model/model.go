@@ -39,28 +39,6 @@ type Room struct {
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
-type VideoStatus string
-
-const (
-	VideoStatusProcessing VideoStatus = "processing"
-	VideoStatusReady      VideoStatus = "ready"
-	VideoStatusError      VideoStatus = "error"
-)
-
-type Video struct {
-	ID         string      `json:"id"`
-	Title      string      `json:"title"`
-	FilePath   string      `json:"file_path"`
-	PosterPath string      `json:"poster_path,omitempty"`
-	Duration   float64     `json:"duration"`
-	Format     string      `json:"format"`
-	Size       int64       `json:"size"`
-	SourceURL  string      `json:"source_url,omitempty"`
-	Status     VideoStatus `json:"status"`
-	CreatedAt  time.Time   `json:"created_at"`
-	UpdatedAt  time.Time   `json:"updated_at"`
-}
-
 type PlaybackAction string
 
 const (

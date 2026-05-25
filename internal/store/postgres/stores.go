@@ -149,101 +149,6 @@ func (s *RoomStore) Delete(ctx context.Context, id string) error {
 	return requireRows(res)
 }
 
-type VideoStore struct {
-	db *sql.DB
-}
-
-func NewVideoStore(db *sql.DB) *VideoStore {
-	return &VideoStore{db: db}
-}
-
-func (s *VideoStore) Create(ctx context.Context, video *model.Video) error {
-	now := utcNow()
-	if video.ID == "" {
-		video.ID = uuid.NewString()
-	}
-	if video.Status == "" {
-		video.Status = model.VideoStatusProcessing
-	}
-	if video.CreatedAt.IsZero() {
-		video.CreatedAt = now
-	}
-	video.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `INSERT INTO videos (id, title, file_path, poster_path, duration, format, size, source_url, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		video.ID, video.Title, video.FilePath, video.PosterPath, video.Duration, video.Format, video.Size, video.SourceURL, string(video.Status), video.CreatedAt, video.UpdatedAt)
-	return wrapConstraint(err)
-}
-
-func (s *VideoStore) GetByID(ctx context.Context, id string) (*model.Video, error) {
-	return scanVideo(s.db.QueryRowContext(ctx, `SELECT id, title, file_path, poster_path, duration, format, size, source_url, status, created_at, updated_at FROM videos WHERE id = $1`, id))
-}
-
-func (s *VideoStore) List(ctx context.Context, opts store.ListVideosOpts) ([]*model.Video, int, error) {
-	limit, offset := normalizePage(opts.Limit, opts.Offset)
-	where := []string{}
-	args := []any{}
-	if opts.Status != "" {
-		args = append(args, string(opts.Status))
-		where = append(where, fmt.Sprintf("status = $%d", len(args)))
-	}
-	if opts.Query != "" {
-		args = append(args, "%"+opts.Query+"%")
-		where = append(where, fmt.Sprintf("title ILIKE $%d", len(args)))
-	}
-	whereSQL := ""
-	if len(where) > 0 {
-		whereSQL = " WHERE " + strings.Join(where, " AND ")
-	}
-
-	var total int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM videos`+whereSQL, args...).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-
-	args = append(args, limit, offset)
-	rows, err := s.db.QueryContext(ctx, `SELECT id, title, file_path, poster_path, duration, format, size, source_url, status, created_at, updated_at FROM videos`+whereSQL+fmt.Sprintf(` ORDER BY created_at DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-
-	videos := []*model.Video{}
-	for rows.Next() {
-		video, err := scanVideo(rows)
-		if err != nil {
-			return nil, 0, err
-		}
-		videos = append(videos, video)
-	}
-	return videos, total, rows.Err()
-}
-
-func (s *VideoStore) Update(ctx context.Context, video *model.Video) error {
-	video.UpdatedAt = utcNow()
-	res, err := s.db.ExecContext(ctx, `UPDATE videos SET title = $1, file_path = $2, poster_path = $3, duration = $4, format = $5, size = $6, source_url = $7, status = $8, updated_at = $9 WHERE id = $10`,
-		video.Title, video.FilePath, video.PosterPath, video.Duration, video.Format, video.Size, video.SourceURL, string(video.Status), video.UpdatedAt, video.ID)
-	if err != nil {
-		return wrapConstraint(err)
-	}
-	return requireRows(res)
-}
-
-func (s *VideoStore) UpdateStatus(ctx context.Context, id string, status model.VideoStatus) error {
-	res, err := s.db.ExecContext(ctx, `UPDATE videos SET status = $1, updated_at = $2 WHERE id = $3`, string(status), utcNow(), id)
-	if err != nil {
-		return err
-	}
-	return requireRows(res)
-}
-
-func (s *VideoStore) Delete(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM videos WHERE id = $1`, id)
-	if err != nil {
-		return err
-	}
-	return requireRows(res)
-}
-
 func scanUser(scanner interface {
 	Scan(dest ...any) error
 }) (*model.User, error) {
@@ -266,18 +171,6 @@ func scanRoom(scanner interface {
 	}
 	room.Visibility = model.RoomVisibility(visibility)
 	return &room, nil
-}
-
-func scanVideo(scanner interface {
-	Scan(dest ...any) error
-}) (*model.Video, error) {
-	var video model.Video
-	var status string
-	if err := scanner.Scan(&video.ID, &video.Title, &video.FilePath, &video.PosterPath, &video.Duration, &video.Format, &video.Size, &video.SourceURL, &status, &video.CreatedAt, &video.UpdatedAt); err != nil {
-		return nil, wrapNotFound(err)
-	}
-	video.Status = model.VideoStatus(status)
-	return &video, nil
 }
 
 func normalizePage(limit, offset int) (int, int) {

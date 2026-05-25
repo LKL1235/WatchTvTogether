@@ -97,8 +97,8 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	memberControl := postJSON(t, server.URL+"/api/rooms/"+roomID+"/control", memberAccess, map[string]any{
 		"action":   "seek",
 		"position": 42.5,
-		"video_id": "video-1",
-		"queue":    []string{"video-1", "video-2"},
+		"video_id": "https://example.test/v1.mp4",
+		"queue":    []string{"https://example.test/v1.mp4", "https://example.test/v2.mp4"},
 	})
 	if memberControl.Code != http.StatusForbidden {
 		t.Fatalf("member control status = %d body = %s", memberControl.Code, memberControl.Body.String())
@@ -107,8 +107,8 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	ownerControl := postJSON(t, server.URL+"/api/rooms/"+roomID+"/control", ownerAccess, map[string]any{
 		"action":   "seek",
 		"position": 42.5,
-		"video_id": "video-1",
-		"queue":    []string{"video-1", "video-2"},
+		"video_id": "https://example.test/v1.mp4",
+		"queue":    []string{"https://example.test/v1.mp4", "https://example.test/v2.mp4"},
 	})
 	if ownerControl.Code != http.StatusOK {
 		t.Fatalf("owner control status = %d body = %s", ownerControl.Code, ownerControl.Body.String())
@@ -134,7 +134,7 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	if got := numericField(t, state.Body.Bytes(), "position"); got != 42.5 {
 		t.Fatalf("state position = %v", got)
 	}
-	if got := stringSliceField(t, state.Body.Bytes(), "queue"); len(got) != 2 || got[1] != "video-2" {
+	if got := stringSliceField(t, state.Body.Bytes(), "queue"); len(got) != 2 || got[1] != "https://example.test/v2.mp4" {
 		t.Fatalf("state queue = %#v body = %s", got, state.Body.String())
 	}
 
@@ -142,7 +142,7 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	if snapshot.Code != http.StatusOK {
 		t.Fatalf("snapshot status = %d body = %s", snapshot.Code, snapshot.Body.String())
 	}
-	if got := stringSliceField(t, snapshot.Body.Bytes(), "queue"); len(got) != 2 || got[0] != "video-1" {
+	if got := stringSliceField(t, snapshot.Body.Bytes(), "queue"); len(got) != 2 || got[0] != "https://example.test/v1.mp4" {
 		t.Fatalf("snapshot queue = %#v body = %s", got, snapshot.Body.String())
 	}
 	if numericField(t, snapshot.Body.Bytes(), "viewer_count") != 0 {
@@ -244,7 +244,7 @@ func TestAuthRoomAndAblyHTTPFlow(t *testing.T) {
 	if got, _ := dbgRoom["viewer_count"].(float64); got != 0 {
 		t.Fatalf("debug room viewer_count = %#v", dbgRoom)
 	}
-	if got, _ := dbgRoom["queue"].([]any); len(got) != 2 || got[1] != "video-2" {
+	if got, _ := dbgRoom["queue"].([]any); len(got) != 2 || got[1] != "https://example.test/v2.mp4" {
 		t.Fatalf("debug room queue = %#v", dbgRoom)
 	}
 }
@@ -358,14 +358,7 @@ func TestSnapshotPlayAndPauseReflectsRoomState(t *testing.T) {
 	server := httptest.NewServer(router)
 	defer server.Close()
 
-	vid := "vid-snap-test"
-	_ = deps.VideoStore.Create(context.Background(), &model.Video{
-		ID:       vid,
-		Title:    "t",
-		FilePath: "/x",
-		Duration: 100,
-		Status:   model.VideoStatusReady,
-	})
+	vid := "https://example.test/snap.m3u8"
 
 	owner := registerUser(t, server.URL, "snapowner@example.test", "snapowner", "Password123")
 	ownerAccess := tokenFrom(t, owner.Body.Bytes(), "access_token")
@@ -375,7 +368,7 @@ func TestSnapshotPlayAndPauseReflectsRoomState(t *testing.T) {
 	roomID := stringField(t, create.Body.Bytes(), "id")
 
 	play := postJSON(t, server.URL+"/api/rooms/"+roomID+"/control", ownerAccess, map[string]any{
-		"action": "play", "position": 10.0, "video_id": vid, "queue": []string{vid},
+		"action": "play", "position": 10.0, "video_id": vid, "queue": []string{vid}, "video_duration": 100.0,
 	})
 	if play.Code != http.StatusOK {
 		t.Fatalf("control play: %d %s", play.Code, play.Body.String())
@@ -404,7 +397,7 @@ func TestSnapshotPlayAndPauseReflectsRoomState(t *testing.T) {
 	}
 
 	pause := postJSON(t, server.URL+"/api/rooms/"+roomID+"/control", ownerAccess, map[string]any{
-		"action": "pause", "position": 22.0, "video_id": vid, "queue": []string{vid},
+		"action": "pause", "position": 22.0, "video_id": vid, "queue": []string{vid}, "video_duration": 100.0,
 	})
 	if pause.Code != http.StatusOK {
 		t.Fatalf("control pause: %d %s", pause.Code, pause.Body.String())

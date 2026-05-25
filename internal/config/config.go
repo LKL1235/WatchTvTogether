@@ -29,8 +29,6 @@ type Config struct {
 	JWTRefreshTTL     time.Duration `yaml:"-"`
 	JWTAccessTTLRaw   string        `yaml:"jwt_access_ttl"`
 	JWTRefreshTTLRaw  string        `yaml:"jwt_refresh_ttl"`
-	StorageDir        string        `yaml:"storage_dir"`
-	PosterDir         string        `yaml:"poster_dir"`
 	CorsOrigins       []string      `yaml:"cors_origins"`
 	AblyRootKey       string        `yaml:"ably_root_key"`
 	AblyTokenTTL      time.Duration `yaml:"-"`
@@ -73,8 +71,6 @@ func Default() Config {
 		JWTSecret:                "change-me-in-production",
 		JWTAccessTTLRaw:          "15m",
 		JWTRefreshTTLRaw:         "168h",
-		StorageDir:               "./data/videos",
-		PosterDir:                "./data/posters",
 		AblyTokenTTLRaw:          "30m",
 		AblyJWTTTLRaw:            "",
 		AblyChannelPrefix:        "watchtogether",
@@ -147,8 +143,6 @@ func applyEnv(cfg *Config) {
 	setString(&cfg.JWTSecret, "JWT_SECRET")
 	setString(&cfg.JWTAccessTTLRaw, "JWT_ACCESS_TTL")
 	setString(&cfg.JWTRefreshTTLRaw, "JWT_REFRESH_TTL")
-	setString(&cfg.StorageDir, "STORAGE_DIR")
-	setString(&cfg.PosterDir, "POSTER_DIR")
 	setString(&cfg.AblyRootKey, "ABLY_ROOT_KEY")
 	setString(&cfg.AblyTokenTTLRaw, "ABLY_TOKEN_TTL")
 	setString(&cfg.AblyJWTTTLRaw, "ABLY_JWT_TTL")

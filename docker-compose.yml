@@ -51,12 +51,8 @@ services:
       EMAIL_CODE_SEND_INTERVAL: ${EMAIL_CODE_SEND_INTERVAL:-60s}
       EMAIL_CODE_DAILY_LIMIT: ${EMAIL_CODE_DAILY_LIMIT:-5}
       EMAIL_CODE_MAX_ATTEMPTS: ${EMAIL_CODE_MAX_ATTEMPTS:-5}
-      STORAGE_DIR: /data/videos
-      POSTER_DIR: /data/posters
     ports:
       - "${APP_PORT:-8080}:8080"
-    volumes:
-      - app-data:/data
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz >/dev/null"]
       interval: 30s
@@ -64,6 +60,5 @@ services:
       retries: 3
 
 volumes:
-  app-data:
   postgres-data:
   redis-data:

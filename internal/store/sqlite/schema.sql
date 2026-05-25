@@ -21,20 +21,3 @@ CREATE TABLE IF NOT EXISTS rooms (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rooms_created_at ON rooms(created_at DESC);
-
-CREATE TABLE IF NOT EXISTS videos (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    file_path TEXT NOT NULL,
-    poster_path TEXT NOT NULL DEFAULT '',
-    duration REAL NOT NULL DEFAULT 0,
-    format TEXT NOT NULL DEFAULT '',
-    size INTEGER NOT NULL DEFAULT 0,
-    source_url TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_videos_created_at ON videos(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_videos_title ON videos(title);

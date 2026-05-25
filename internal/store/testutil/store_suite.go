@@ -13,9 +13,8 @@ import (
 )
 
 type Suite struct {
-	Users  store.UserStore
-	Rooms  store.RoomStore
-	Videos store.VideoStore
+	Users store.UserStore
+	Rooms store.RoomStore
 }
 
 func RunStoreSuite(t *testing.T, newSuite func(t *testing.T) Suite) {
@@ -105,48 +104,6 @@ func RunStoreSuite(t *testing.T, newSuite func(t *testing.T) Suite) {
 		}
 		if _, err := suite.Rooms.GetByID(ctx, room.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("expected ErrNotFound, got %v", err)
-		}
-	})
-
-	t.Run("videos", func(t *testing.T) {
-		ctx := context.Background()
-		suite := newSuite(t)
-		now := time.Now().UTC()
-		video := &model.Video{
-			ID:        uuid.NewString(),
-			Title:     "Example",
-			FilePath:  "/videos/example.mp4",
-			Duration:  123,
-			Format:    "mp4",
-			Size:      1024,
-			SourceURL: "https://example.test/video.mp4",
-			Status:    model.VideoStatusProcessing,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-
-		if err := suite.Videos.Create(ctx, video); err != nil {
-			t.Fatalf("create video: %v", err)
-		}
-		if err := suite.Videos.UpdateStatus(ctx, video.ID, model.VideoStatusReady); err != nil {
-			t.Fatalf("update video status: %v", err)
-		}
-		got, err := suite.Videos.GetByID(ctx, video.ID)
-		if err != nil {
-			t.Fatalf("get video: %v", err)
-		}
-		if got.Status != model.VideoStatusReady {
-			t.Fatalf("status mismatch: %q", got.Status)
-		}
-		videos, total, err := suite.Videos.List(ctx, store.ListVideosOpts{Query: "exam", Limit: 10})
-		if err != nil {
-			t.Fatalf("list videos: %v", err)
-		}
-		if total != 1 || len(videos) != 1 {
-			t.Fatalf("unexpected videos result: total=%d len=%d", total, len(videos))
-		}
-		if err := suite.Videos.Delete(ctx, video.ID); err != nil {
-			t.Fatalf("delete video: %v", err)
 		}
 	})
 }

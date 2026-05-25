@@ -42,7 +42,7 @@ func TestRunEmptyRoomCleanupRemovesDBOnlyEmptyRoom(t *testing.T) {
 	presence := memory.NewRoomPresence()
 	access := memory.NewRoomAccess()
 	rs := &memRooms{rooms: make(map[string]*model.Room)}
-	svc := NewService(states, presence, rs, nil, access, nil, nil, ChatLimits{})
+	svc := NewService(states, presence, rs, access, nil, nil, ChatLimits{})
 
 	rid := uuid.NewString()
 	rs.rooms[rid] = &model.Room{ID: rid, Name: "ghost"}
@@ -64,7 +64,7 @@ func TestRunEmptyRoomCleanupDeletesPending(t *testing.T) {
 	states := memory.NewRoomStateCache()
 	presence := memory.NewRoomPresence()
 	rs := &memRooms{rooms: make(map[string]*model.Room)}
-	svc := NewService(states, presence, rs, nil, nil, nil, nil, ChatLimits{})
+	svc := NewService(states, presence, rs, nil, nil, nil, ChatLimits{})
 
 	rid := uuid.NewString()
 	rs.rooms[rid] = &model.Room{ID: rid, Name: "x"}
@@ -79,6 +79,33 @@ func TestRunEmptyRoomCleanupDeletesPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := rs.rooms[rid]; ok {
-		t.Fatal("room should be deleted from store")
+		t.Fatal("room should be deleted after last member leaves")
+	}
+}
+
+func TestApplyControlPersistsVideoDuration(t *testing.T) {
+	ctx := context.Background()
+	states := memory.NewRoomStateCache()
+	rs := &memRooms{rooms: make(map[string]*model.Room)}
+	svc := NewService(states, nil, rs, nil, nil, nil, ChatLimits{})
+
+	rid := uuid.NewString()
+	url := "https://cdn.example.test/movie.m3u8"
+	_, err := svc.ApplyControl(ctx, rid, User{ID: "o1", Username: "o1", IsOwner: true}, ControlInput{
+		Action:        model.PlaybackActionPlay,
+		Position:      5,
+		VideoID:       url,
+		Queue:         []string{url},
+		VideoDuration: 3600,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := states.GetRoomState(ctx, rid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.VideoDuration != 3600 {
+		t.Fatalf("video_duration = %v want 3600", st.VideoDuration)
 	}
 }

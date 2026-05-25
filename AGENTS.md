@@ -17,7 +17,7 @@ This workspace has two repos: **WatchTvTogether** (Go backend) and **WatchTvToge
 ### Frontend (WatchTvTogether-Web)
 
 - **Tech**: Vue 3 + Vite + TypeScript + Pinia.
-- **Run**: `VITE_API_BASE="" npm run dev` — listens on `:5173`, proxies `/api` and `/static` to `localhost:8080`.
+- **Run**: `VITE_API_BASE="" npm run dev` — listens on `:5173`, proxies `/api` to `localhost:8080`.
 - **Critical**: Set `VITE_API_BASE=""` or the frontend will call the production server instead of the local backend.
 - **Lint**: `npx vue-tsc --noEmit`
 - **Test**: `npm run test` (vitest, 18 tests)
