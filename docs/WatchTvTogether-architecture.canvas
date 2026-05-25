@@ -1,0 +1,404 @@
+{
+  "nodes": [
+    {
+      "id": "title000000000001",
+      "type": "text",
+      "x": 40,
+      "y": -40,
+      "width": 1320,
+      "height": 100,
+      "color": "6",
+      "text": "# WatchTvTogether 系统架构\n\n前后端分离 · Go API + Vue 3 SPA · PostgreSQL + Redis + Ably\n\n**仓库**：`WatchTvTogether`（后端） · `WatchTvTogether-Web`（前端）"
+    },
+    {
+      "id": "layer01client00001",
+      "type": "group",
+      "x": 40,
+      "y": 80,
+      "width": 1320,
+      "height": 150,
+      "label": "① 客户端与接入层",
+      "color": "5"
+    },
+    {
+      "id": "n01browser0000001",
+      "type": "text",
+      "x": 70,
+      "y": 120,
+      "width": 260,
+      "height": 90,
+      "color": "5",
+      "text": "**用户浏览器**\n\n访问 Web SPA\n房间同步观看"
+    },
+    {
+      "id": "n01deploy00000001",
+      "type": "text",
+      "x": 360,
+      "y": 120,
+      "width": 420,
+      "height": 90,
+      "color": "5",
+      "text": "**部署接入**\n\n- 生产：Vercel 托管前端静态资源\n- 开发：`localhost:5173`（Vite）\n- `VITE_API_BASE` 指向 Go API"
+    },
+    {
+      "id": "n01proxy000000001",
+      "type": "text",
+      "x": 810,
+      "y": 120,
+      "width": 520,
+      "height": 90,
+      "color": "5",
+      "text": "**开发代理**\n\nVite 将 `/api`、`/static` 转发至 `localhost:8080`\n生产环境由浏览器直连 API 域名"
+    },
+    {
+      "id": "layer02frontend001",
+      "type": "group",
+      "x": 40,
+      "y": 260,
+      "width": 1320,
+      "height": 300,
+      "label": "② 前端表现层 — WatchTvTogether-Web",
+      "color": "4"
+    },
+    {
+      "id": "n02stack000000001",
+      "type": "text",
+      "x": 70,
+      "y": 310,
+      "width": 300,
+      "height": 220,
+      "color": "4",
+      "text": "**技术栈**\n\nVue 3 + Vite + TypeScript\nPinia · Vue Router\n\n`src/main.ts`\n`src/api.ts`（HTTP 客户端）\n`src/stores/auth.ts`"
+    },
+    {
+      "id": "n02views00000001",
+      "type": "text",
+      "x": 400,
+      "y": 310,
+      "width": 400,
+      "height": 220,
+      "color": "4",
+      "text": "**页面与组件**\n\n- `AuthView` 登录/注册/找回密码\n- `LobbyView` 大厅与建房\n- `RoomView` 播放/队列/聊天\n- `AdminView` 视频库与房间监控\n\n`components/room/*` 聊天 UI\n`components/ui/*` 通用组件"
+    },
+    {
+      "id": "n02realtime00001",
+      "type": "text",
+      "x": 830,
+      "y": 310,
+      "width": 490,
+      "height": 220,
+      "color": "4",
+      "text": "**房间实时（客户端）**\n\n`useRoomRealtime.ts`\n- Ably Realtime 订阅频道\n- 事件：`room.sync` / `room.event` / `room.snapshot` / `room.chat`\n- Presence 维护在线成员\n\n控制与聊天发送走 **REST**，不经客户端 publish\nJWT 由 `POST /api/ably/token` 续签"
+    },
+    {
+      "id": "layer03api0000001",
+      "type": "group",
+      "x": 40,
+      "y": 590,
+      "width": 1320,
+      "height": 240,
+      "label": "③ API 网关层 — WatchTvTogether / cmd/server",
+      "color": "3"
+    },
+    {
+      "id": "n03entry00000001",
+      "type": "text",
+      "x": 70,
+      "y": 640,
+      "width": 280,
+      "height": 170,
+      "color": "3",
+      "text": "**程序入口**\n\n`cmd/server/main.go`\n\n组装配置、Store、Cache、\nAbly、邮件、路由后监听 `:8080`\n优雅关闭（SIGINT/SIGTERM）"
+    },
+    {
+      "id": "n03router0000001",
+      "type": "text",
+      "x": 380,
+      "y": 640,
+      "width": 480,
+      "height": 170,
+      "color": "3",
+      "text": "**HTTP 路由 — `internal/api`**\n\nGin + CORS + Recovery\n\n`/healthz` · `/api/auth/*` · `/api/users/me`\n`/api/rooms/*` · `/api/videos/*`\n`/api/ably/token` · `/api/capabilities`\n`/api/admin/*` · 房间 control / chat / snapshot"
+    },
+    {
+      "id": "n03static0000001",
+      "type": "text",
+      "x": 890,
+      "y": 640,
+      "width": 430,
+      "height": 170,
+      "color": "3",
+      "text": "**静态资源映射**\n\n`GET /static/videos/*` → `StorageDir`\n`GET /static/posters/*` → `PosterDir`\n\n生产建议配合 CDN / 对象存储；\n影片主路径为外链 / HLS / 签名 URL"
+    },
+    {
+      "id": "layer04business01",
+      "type": "group",
+      "x": 40,
+      "y": 860,
+      "width": 1320,
+      "height": 280,
+      "label": "④ 业务逻辑层",
+      "color": "2"
+    },
+    {
+      "id": "n04auth000000001",
+      "type": "text",
+      "x": 70,
+      "y": 910,
+      "width": 300,
+      "height": 200,
+      "color": "2",
+      "text": "**认证 — `internal/auth`**\n\n注册/登录/刷新/登出\nJWT access + refresh\n邮箱验证码（Redis）\n密码重置、会话失效"
+    },
+    {
+      "id": "n04room00000001",
+      "type": "text",
+      "x": 400,
+      "y": 910,
+      "width": 360,
+      "height": 200,
+      "color": "2",
+      "text": "**房间 — `internal/room`**\n\n建房/加入/踢人/销毁\n播放控制（control_version）\n队列与状态快照\n全局清理定时任务\n\n`hub.go` 编排 Store + Cache + Realtime"
+    },
+    {
+      "id": "n04chat00000001",
+      "type": "text",
+      "x": 790,
+      "y": 910,
+      "width": 280,
+      "height": 200,
+      "color": "2",
+      "text": "**房间聊天**\n\n`POST/GET .../chat`\nRedis Stream 存历史\nAbly REST 发布 `room.chat`\n限流 / 载荷 / 重试队列"
+    },
+    {
+      "id": "n04realtime0001",
+      "type": "text",
+      "x": 1100,
+      "y": 910,
+      "width": 220,
+      "height": 200,
+      "color": "2",
+      "text": "**实时 — `internal/realtime/ably`**\n\n签发 Ably JWT\nREST 发布房间消息\n`room.sync` 等频道事件"
+    },
+    {
+      "id": "n04email0000001",
+      "type": "text",
+      "x": 70,
+      "y": 1120,
+      "width": 300,
+      "height": 90,
+      "color": "2",
+      "text": "**邮件 — `internal/email`**\n\nResend API 发验证码\n`internal/emailcode` + Redis"
+    },
+    {
+      "id": "n04caps00000001",
+      "type": "text",
+      "x": 400,
+      "y": 1120,
+      "width": 300,
+      "height": 90,
+      "color": "2",
+      "text": "**能力探测 — `internal/capabilities`**\n\n`GET /api/capabilities`\n（已移除服务端 yt-dlp 下载）"
+    },
+    {
+      "id": "layer05data000001",
+      "type": "group",
+      "x": 40,
+      "y": 1170,
+      "width": 1320,
+      "height": 220,
+      "label": "⑤ 数据访问与缓存抽象层",
+      "color": "6"
+    },
+    {
+      "id": "n05store00000001",
+      "type": "text",
+      "x": 70,
+      "y": 1220,
+      "width": 580,
+      "height": 150,
+      "color": "6",
+      "text": "**持久化 — `internal/store`**\n\n接口：`UserStore` · `RoomStore` · `VideoStore`\n\n实现：`internal/store/postgres`\n用户/房间/视频元数据 · SQL 迁移 `migrations/`\n\n`model` 领域模型"
+    },
+    {
+      "id": "n05cache00000001",
+      "type": "text",
+      "x": 680,
+      "y": 1220,
+      "width": 640,
+      "height": 150,
+      "color": "6",
+      "text": "**缓存 — `internal/cache`（生产仅 Redis）**\n\n`SessionCache` 会话\n`RoomStateCache` 播放状态\n`RoomPresence` 在线人数\n`RoomAccessCache` 私有房访问\n`RoomChat` Stream 聊天\n`PubSub` 跨实例通知\n\n`memory` 包仅用于测试"
+    },
+    {
+      "id": "layer06external01",
+      "type": "group",
+      "x": 40,
+      "y": 1420,
+      "width": 1320,
+      "height": 240,
+      "label": "⑥ 外部基础设施与第三方服务",
+      "color": "1"
+    },
+    {
+      "id": "n06pg0000000001",
+      "type": "text",
+      "x": 70,
+      "y": 1470,
+      "width": 240,
+      "height": 160,
+      "color": "1",
+      "text": "**PostgreSQL 15**\n\n用户/房间/视频\n持久化存储\n\n`POSTGRES_DSN`"
+    },
+    {
+      "id": "n06redis0000001",
+      "type": "text",
+      "x": 340,
+      "y": 1470,
+      "width": 240,
+      "height": 160,
+      "color": "1",
+      "text": "**Redis**\n\n会话/房间状态/验证码\n聊天 Stream · PubSub\n\n`CACHE_BACKEND=redis`"
+    },
+    {
+      "id": "n06ably00000001",
+      "type": "text",
+      "x": 610,
+      "y": 1470,
+      "width": 240,
+      "height": 160,
+      "color": "1",
+      "text": "**Ably Cloud**\n\nRealtime 频道\nPresence · REST 发布\n\n`ABLY_ROOT_KEY`（仅服务端）"
+    },
+    {
+      "id": "n06resend000001",
+      "type": "text",
+      "x": 880,
+      "y": 1470,
+      "width": 200,
+      "height": 160,
+      "color": "1",
+      "text": "**Resend**\n\n注册/重置\n邮箱验证码\n\n`RESEND_API_KEY`"
+    },
+    {
+      "id": "n06media0000001",
+      "type": "text",
+      "x": 1100,
+      "y": 1470,
+      "width": 220,
+      "height": 160,
+      "color": "1",
+      "text": "**媒资来源**\n\n外链 MP4\nHLS (m3u8)\nCDN / 对象存储签名 URL"
+    },
+    {
+      "id": "legend000000001",
+      "type": "text",
+      "x": 40,
+      "y": 1690,
+      "width": 1320,
+      "height": 120,
+      "text": "**主要数据流**\n\n1. 浏览器 → REST（`api.ts`）→ Gin Handler → Store/Cache\n2. 进入房间：`snapshot` 拉状态 + `ably/token` 拿 JWT → Ably 订阅同步事件\n3. 房主控制 / 发聊天：REST → 业务层 → Redis（状态/Stream）→ Ably REST 广播\n4. 注册验证码：API → Redis 存码 → Resend 发信"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e01browser2fe001",
+      "fromNode": "n01browser0000001",
+      "fromSide": "bottom",
+      "toNode": "n02stack000000001",
+      "toSide": "top",
+      "label": "加载 SPA"
+    },
+    {
+      "id": "e02fe2api0000001",
+      "fromNode": "n02stack000000001",
+      "fromSide": "bottom",
+      "toNode": "n03router0000001",
+      "toSide": "top",
+      "label": "HTTP REST /api/*"
+    },
+    {
+      "id": "e03rt2ablyjwt01",
+      "fromNode": "n02realtime00001",
+      "fromSide": "bottom",
+      "toNode": "n03router0000001",
+      "toSide": "top",
+      "label": "JWT + snapshot"
+    },
+    {
+      "id": "e04router2biz01",
+      "fromNode": "n03router0000001",
+      "fromSide": "bottom",
+      "toNode": "n04room00000001",
+      "toSide": "top",
+      "label": "handlers"
+    },
+    {
+      "id": "e05auth2store01",
+      "fromNode": "n04auth000000001",
+      "fromSide": "bottom",
+      "toNode": "n05store00000001",
+      "toSide": "top"
+    },
+    {
+      "id": "e06room2cache01",
+      "fromNode": "n04room00000001",
+      "fromSide": "bottom",
+      "toNode": "n05cache00000001",
+      "toSide": "top"
+    },
+    {
+      "id": "e07chat2cache01",
+      "fromNode": "n04chat00000001",
+      "fromSide": "bottom",
+      "toNode": "n05cache00000001",
+      "toSide": "top",
+      "label": "Stream"
+    },
+    {
+      "id": "e08rt2ablycloud1",
+      "fromNode": "n04realtime0001",
+      "fromSide": "bottom",
+      "toNode": "n06ably00000001",
+      "toSide": "top",
+      "label": "REST publish"
+    },
+    {
+      "id": "e09store2pg0001",
+      "fromNode": "n05store00000001",
+      "fromSide": "bottom",
+      "toNode": "n06pg0000000001",
+      "toSide": "top"
+    },
+    {
+      "id": "e10cache2redis1",
+      "fromNode": "n05cache00000001",
+      "fromSide": "bottom",
+      "toNode": "n06redis0000001",
+      "toSide": "top"
+    },
+    {
+      "id": "e11email2resend1",
+      "fromNode": "n04email000000001",
+      "fromSide": "bottom",
+      "toNode": "n06resend000001",
+      "toSide": "top"
+    },
+    {
+      "id": "e12fe2ablysub01",
+      "fromNode": "n02realtime00001",
+      "fromSide": "bottom",
+      "toNode": "n06ably00000001",
+      "toSide": "top",
+      "label": "Realtime 订阅"
+    },
+    {
+      "id": "e13videos2media1",
+      "fromNode": "n03static0000001",
+      "fromSide": "bottom",
+      "toNode": "n06media0000001",
+      "toSide": "top",
+      "label": "播放 URL"
+    }
+  ]
+}
