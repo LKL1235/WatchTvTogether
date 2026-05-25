@@ -3,6 +3,7 @@ package room
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"time"
 
@@ -350,7 +351,17 @@ func (s *Service) MaybeRunGlobalCleanup(ctx context.Context) error {
 	}
 	defer func() { _ = s.presence.ReleaseCleanupLock(ctx) }()
 
-	if err := s.RunEmptyRoomCleanup(ctx); err != nil {
+	lastAge := "首次"
+	if !last.IsZero() {
+		lastAge = s.now().Sub(last).Round(time.Second).String()
+	}
+	trigger := emptyRoomCleanupTrigger{
+		lastCleanupAgo:    lastAge,
+		minInterval:       loginCleanupInterval,
+		lockAcquired:      true,
+		triggeredByGlobal: true,
+	}
+	if err := s.RunEmptyRoomCleanup(ctx, trigger); err != nil {
 		return err
 	}
 	_ = s.ProcessGlobalChatPending(ctx)
@@ -376,10 +387,75 @@ func mergeUniqueRoomIDs(parts ...[]string) []string {
 	return out
 }
 
+type emptyRoomCleanupTrigger struct {
+	lastCleanupAgo    string
+	minInterval       time.Duration
+	lockAcquired      bool
+	triggeredByGlobal bool
+}
+
+type emptyRoomCleanupEntry struct {
+	roomID    string
+	existence string
+	online    int
+}
+
+func roomByIDFromList(rooms []*model.Room) map[string]*model.Room {
+	out := make(map[string]*model.Room, len(rooms))
+	for _, r := range rooms {
+		if r != nil && r.ID != "" {
+			out[r.ID] = r
+		}
+	}
+	return out
+}
+
+func roomExistenceLabel(roomID string, byID map[string]*model.Room, now time.Time) string {
+	r, ok := byID[roomID]
+	if !ok || r == nil || r.CreatedAt.IsZero() {
+		return "未知"
+	}
+	return now.Sub(r.CreatedAt).Round(time.Second).String()
+}
+
+func logEmptyRoomCleanupResults(cleaned, skipped []emptyRoomCleanupEntry, pendingN, activeN, dbN, candidatesN int, trigger emptyRoomCleanupTrigger) {
+	for _, e := range cleaned {
+		log.Printf("room cleanup: 已清理 room_id=%s 存在时间=%s 在线人数=%d", e.roomID, e.existence, e.online)
+	}
+	for _, e := range skipped {
+		log.Printf("room cleanup: 不需清理 room_id=%s 存在时间=%s 在线人数=%d", e.roomID, e.existence, e.online)
+	}
+	lockState := "未获取"
+	if trigger.lockAcquired {
+		lockState = "已获取"
+	}
+	source := "手动或测试调用"
+	if trigger.triggeredByGlobal {
+		source = "登录后全局清理(MaybeRunGlobalCleanup)"
+	}
+	log.Printf(
+		"room cleanup: 触发条件 来源=%s 距上次清理=%s 最小间隔=%s 清理锁=%s 扫描pending=%d 扫描active=%d 扫描db=%d 候选房间=%d 已清理=%d 不需清理=%d 规则=在线人数为0时关闭房间",
+		source,
+		trigger.lastCleanupAgo,
+		trigger.minInterval,
+		lockState,
+		pendingN,
+		activeN,
+		dbN,
+		candidatesN,
+		len(cleaned),
+		len(skipped),
+	)
+}
+
 // RunEmptyRoomCleanup closes rooms with no online members: pending-empty set, active member sets, and DB-listed rooms.
-func (s *Service) RunEmptyRoomCleanup(ctx context.Context) error {
+func (s *Service) RunEmptyRoomCleanup(ctx context.Context, trigger ...emptyRoomCleanupTrigger) error {
 	if s.presence == nil || s.rooms == nil {
 		return nil
+	}
+	var trig emptyRoomCleanupTrigger
+	if len(trigger) > 0 {
+		trig = trigger[0]
 	}
 	pending, err := s.presence.PendingEmptyRooms(ctx)
 	if err != nil {
@@ -399,21 +475,32 @@ func (s *Service) RunEmptyRoomCleanup(ctx context.Context) error {
 			dbIDs = append(dbIDs, r.ID)
 		}
 	}
+	byID := roomByIDFromList(dbRooms)
+	now := s.now()
 	candidates := mergeUniqueRoomIDs(pending, active, dbIDs)
+	var cleaned, skipped []emptyRoomCleanupEntry
 	for _, roomID := range candidates {
 		n, err := s.presence.MemberCount(ctx, roomID)
 		if err != nil {
 			continue
 		}
+		entry := emptyRoomCleanupEntry{
+			roomID:    roomID,
+			existence: roomExistenceLabel(roomID, byID, now),
+			online:    n,
+		}
 		if n != 0 {
 			_ = s.presence.ClearPendingEmpty(ctx, roomID)
+			skipped = append(skipped, entry)
 			continue
 		}
 		if err := s.closeEmptyRoom(ctx, roomID); err != nil {
 			return err
 		}
 		_ = s.presence.ClearPendingEmpty(ctx, roomID)
+		cleaned = append(cleaned, entry)
 	}
+	logEmptyRoomCleanupResults(cleaned, skipped, len(pending), len(active), len(dbIDs), len(candidates), trig)
 	return nil
 }
 
