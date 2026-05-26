@@ -1,8 +1,9 @@
 # 房间内实时聊天 — 设计说明（Ably 共用频道 + Redis Stream）
 
+> **状态：已实现**（PR #37 后端、#24/#28 前端）。下文保留设计 rationale；实现细节以代码为准。  
 > 面向当前代码库：`WatchTvTogether`（Go + Ably REST 发布）与 `WatchTvTogether-Web`（Vue + Ably Realtime 订阅）。  
 > 目标：与**房间控制/同步**共用同一 Ably 频道；聊天记录**仅 Redis（Stream）**、**与房间生命周期一致**、**不落盘**（不写 PostgreSQL）。  
-> **前提**：聊天功能依赖 Redis；`cache_backend` 仅支持 `redis`（房间状态、presence 等同理），本文不描述无 Redis 时的聊天占位行为。
+> **前提**：聊天功能依赖 Redis；`cache_backend` 仅支持 `redis`（房间状态、presence 等同理），未注入 `RoomChat` 时 HTTP 聊天接口返回 **503**。
 
 ---
 
@@ -260,4 +261,19 @@ sequenceDiagram
 
 ---
 
-*本文件为设计计划，实现前若对外 API 或 Redis key 命名有变更，请再评审后编码。*
+## 14. 实现索引（代码路径）
+
+| 模块 | 路径 |
+|------|------|
+| Redis Stream 封装 | `internal/cache/redis/room_chat.go` |
+| HTTP 路由 | `internal/api/room_handlers.go`（`postRoomChat` / `listRoomChat`） |
+| 业务逻辑 | `internal/room/hub.go`（`SendChat` / `ListChat`） |
+| 房间清理 | `CloseRoom` / `closeEmptyRoom` 删除 chat stream、seq、pending key |
+| 前端订阅 | `src/composables/useRoomRealtime.ts`（`room.chat`） |
+| 前端 UI | `src/components/room/RoomChatPanel.vue`（桌面侧栏）、`RoomChatSheet.vue`（移动） |
+
+环境变量见根目录 `README.md` 与 `.env.example`（`CHAT_*` 前缀）。
+
+---
+
+*若对外 API 或 Redis key 命名变更，请同步更新本文与 `README.md`。*

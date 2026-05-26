@@ -32,6 +32,7 @@ WatchTogether 的后端服务仓库（Go + Gin + Ably realtime）。
 
 - 已删除：`GET /api/videos*`（全局影片库）、`GET /api/videos/:id/file`、`GET /static/*`，以及 `storage_dir` / `poster_dir` 配置
 - 房间队列仅接受 **http(s):// 或 //** 外链；`POST /api/rooms/:id/control` 可选 `video_duration`（秒），写入 Redis 供多端进度投影
+- 详细契约见 [docs/room_queue_url_only_zh.md](docs/room_queue_url_only_zh.md)；聊天设计见 [docs/room_chat_realtime_design_zh.md](docs/room_chat_realtime_design_zh.md)
 - 此前 `GET /api/capabilities` 中的 ffmpeg、yt-dlp、aria2 等字段也已删除；**客户端请勿再依赖** `tools`、`ffmpeg`、`ffprobe`、`ytdlp`、`aria2` 或 `features` 中的 `hls_download`、`ytdlp_import`、`magnet_download` 等字段
 
 ## Quick Start
@@ -75,12 +76,13 @@ docker compose up -d --build
 - `POST /api/rooms/:roomId/snapshot`
 - `GET /api/rooms/:roomId/chat`（查询参数：`before_id` 可选游标、`limit` 默认 50 最大 200；私有房可带 `password`）
 - `POST /api/rooms/:roomId/chat`（JSON：`text` 必填；私有房可带 `password`；响应含 `message` 与 `realtime`: `ok` | `deferred`）
-- `POST /api/rooms/:roomId/control`
+- `POST /api/rooms/:roomId/control`（`video_id` / `queue[]` 须为外链 URL；可选 `video_duration`；见 [docs/room_queue_url_only_zh.md](docs/room_queue_url_only_zh.md)）
 - `POST /api/ably/token`（返回 Ably 用 JWT：`token`、`expires_at` RFC3339）
 - `GET /api/rooms/:roomId/state`
 - `POST /api/rooms/:roomId/kick/:uid`
 - `DELETE /api/rooms/:roomId`
-- `POST /api/rooms/:roomId/control`（`video_id` / `queue[]` 须为外链 URL；可选 `video_duration`）
+- `GET /api/admin/rooms`（管理员：房间列表、在线人数、当前播放 URL）
+- `GET /api/admin/debug/rooms`（管理员：调试视图，含 Redis 队列快照）
 
 ### 错误码补充
 
@@ -105,3 +107,4 @@ docker compose up -d --build
 - `internal/realtime` Ably JWT（客户端）与房间消息发布（REST）
 - `internal/capabilities` 能力探测（当前已精简，适配无服务端下载场景）
 - `pkg` 通用工具
+- `docs/` 子系统设计文档（[URL 队列](docs/room_queue_url_only_zh.md)、[房间聊天](docs/room_chat_realtime_design_zh.md)）
