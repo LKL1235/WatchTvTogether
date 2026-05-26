@@ -4,7 +4,7 @@
 
 ## 任务列表
 
-- [ ] 删除 `internal/capabilities` 与 `capabilities_handlers.go`
-- [ ] 从 `router`、`main`、测试中移除依赖
-- [ ] 更新 README 对外 API 说明
-- [ ] 验证 `go test ./...`、`go vet ./...`
+- [x] 删除 `internal/capabilities` 与 `capabilities_handlers.go`
+- [x] 从 `router`、`main`、测试中移除依赖
+- [x] 更新 README 对外 API 说明
+- [x] 验证 `go test ./...`、`go vet ./...`
