@@ -16,7 +16,6 @@ import (
 	"watchtogether/internal/api"
 	"watchtogether/internal/cache"
 	rediscache "watchtogether/internal/cache/redis"
-	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
 	"watchtogether/internal/email"
 	"watchtogether/internal/emailcode"
@@ -67,9 +66,6 @@ func run() error {
 		defer ca.close()
 	}
 
-	caps := capabilities.Check(context.Background())
-	capabilities.Log(caps)
-
 	realtime, err := ablyrealtime.NewService(cfg)
 	if err != nil {
 		return err
@@ -91,7 +87,6 @@ func run() error {
 		PubSub:         ca.pubsub,
 		RoomChat:       roomChatFromCaches(ca),
 		Realtime:       realtime,
-		Capabilities:   caps,
 	})
 
 	srv := &http.Server{
