@@ -11,7 +11,6 @@ import (
 
 	"watchtogether/internal/auth"
 	"watchtogether/internal/cache"
-	"watchtogether/internal/capabilities"
 	"watchtogether/internal/config"
 	"watchtogether/internal/email"
 	"watchtogether/internal/emailcode"
@@ -35,7 +34,6 @@ type Dependencies struct {
 	PubSub         cache.PubSub
 	RoomChat       cache.RoomChat
 	Realtime       realtime.Service
-	Capabilities   capabilities.Report
 }
 
 func NewRouter(deps Dependencies) *gin.Engine {
@@ -78,7 +76,6 @@ func NewRouter(deps Dependencies) *gin.Engine {
 		}()
 		return nil
 	})
-	registerCapabilityRoutes(router, deps)
 	registerAuthRoutes(router, deps, authService)
 	registerAdminRoomRoutes(router, deps, authService, rooms)
 	registerRoomRoutes(router, deps, authService, rooms)

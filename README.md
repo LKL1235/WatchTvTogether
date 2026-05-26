@@ -30,9 +30,8 @@ WatchTogether 的后端服务仓库（Go + Gin + Ably realtime）。
 
 ### 破坏性变更（媒资与 capabilities）
 
-- 已删除：`GET /api/videos*`（全局影片库）、`GET /api/videos/:id/file`、`GET /static/*`，以及 `storage_dir` / `poster_dir` 配置
+- 已删除：`GET /api/videos*`（全局影片库）、`GET /api/videos/:id/file`、`GET /static/*`、`GET /api/capabilities`，以及 `storage_dir` / `poster_dir` 配置
 - 房间队列仅接受 **http(s):// 或 //** 外链；`POST /api/rooms/:id/control` 可选 `video_duration`（秒），写入 Redis 供多端进度投影
-- 此前 `GET /api/capabilities` 中的 ffmpeg、yt-dlp、aria2 等字段也已删除；**客户端请勿再依赖** `tools`、`ffmpeg`、`ffprobe`、`ytdlp`、`aria2` 或 `features` 中的 `hls_download`、`ytdlp_import`、`magnet_download` 等字段
 
 ## Quick Start
 
@@ -59,7 +58,6 @@ docker compose up -d --build
 ## 核心接口
 
 - `GET /healthz`
-- `GET /api/capabilities`（能力说明 JSON；当前为精简结构，见上文）
 - `POST /api/auth/register/code`（发送注册邮箱验证码）
 - `POST /api/auth/register`（`email`、`username`、`password`、`code`、可选 `nickname`/`avatar_url`）
 - `POST /api/auth/password/reset/code`
@@ -103,5 +101,4 @@ docker compose up -d --build
 - `internal/store` 存储抽象与实现（postgres）
 - `internal/cache` 缓存抽象与实现（进程内 memory 包仅用于测试；生产仅 **redis**）
 - `internal/realtime` Ably JWT（客户端）与房间消息发布（REST）
-- `internal/capabilities` 能力探测（当前已精简，适配无服务端下载场景）
 - `pkg` 通用工具

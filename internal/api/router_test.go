@@ -14,7 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
-	"watchtogether/internal/capabilities"
 	"watchtogether/internal/emailcode"
 	"watchtogether/internal/model"
 	"watchtogether/internal/room"
@@ -417,31 +416,6 @@ func TestSnapshotPlayAndPauseReflectsRoomState(t *testing.T) {
 	}
 	if body2.State.Position != 22 {
 		t.Fatalf("position = %v want 22", body2.State.Position)
-	}
-}
-
-func TestCapabilitiesResponse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	db := openTestDB(t)
-	deps := testDeps(db)
-	deps.Capabilities = capabilities.Report{}
-	router := NewRouter(deps)
-	server := httptest.NewServer(router)
-	defer server.Close()
-
-	resp := getJSON(t, server.URL+"/api/capabilities", "")
-	if resp.Code != http.StatusOK {
-		t.Fatalf("capabilities status = %d body = %s", resp.Code, resp.Body.String())
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := payload["features"]; !ok {
-		t.Fatalf("expected features key: %s", resp.Body.String())
-	}
-	if _, ok := payload["ffmpeg"]; ok {
-		t.Fatalf("legacy ffmpeg field should not be present: %s", resp.Body.String())
 	}
 }
 
