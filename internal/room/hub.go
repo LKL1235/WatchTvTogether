@@ -3,10 +3,10 @@ package room
 import (
 	"context"
 	"errors"
-	"log"
 	"strings"
 	"time"
 
+	"watchtogether/internal/applog"
 	"watchtogether/internal/cache"
 	"watchtogether/internal/model"
 	"watchtogether/internal/store"
@@ -420,10 +420,10 @@ func roomExistenceLabel(roomID string, byID map[string]*model.Room, now time.Tim
 
 func logEmptyRoomCleanupResults(cleaned, skipped []emptyRoomCleanupEntry, pendingN, activeN, dbN, candidatesN int, trigger emptyRoomCleanupTrigger) {
 	for _, e := range cleaned {
-		log.Printf("room cleanup: 已清理 room_id=%s 存在时间=%s 在线人数=%d", e.roomID, e.existence, e.online)
+		applog.Infof("room cleanup: 已清理 room_id=%s 存在时间=%s 在线人数=%d", e.roomID, e.existence, e.online)
 	}
 	for _, e := range skipped {
-		log.Printf("room cleanup: 不需清理 room_id=%s 存在时间=%s 在线人数=%d", e.roomID, e.existence, e.online)
+		applog.Infof("room cleanup: 不需清理 room_id=%s 存在时间=%s 在线人数=%d", e.roomID, e.existence, e.online)
 	}
 	lockState := "未获取"
 	if trigger.lockAcquired {
@@ -433,7 +433,7 @@ func logEmptyRoomCleanupResults(cleaned, skipped []emptyRoomCleanupEntry, pendin
 	if trigger.triggeredByGlobal {
 		source = "登录后全局清理(MaybeRunGlobalCleanup)"
 	}
-	log.Printf(
+	applog.Infof(
 		"room cleanup: 触发条件 来源=%s 距上次清理=%s 最小间隔=%s 清理锁=%s 扫描pending=%d 扫描active=%d 扫描db=%d 候选房间=%d 已清理=%d 不需清理=%d 规则=在线人数为0时关闭房间",
 		source,
 		trigger.lastCleanupAgo,
