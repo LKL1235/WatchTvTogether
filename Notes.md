@@ -31,14 +31,14 @@ https://github.com/LKL1235/WatchTvTogether-Web/branches
 - 私有房访问授权有效期为“直到房间关闭/删除”，不能依赖授权 key 过期事件撤销；房间关闭、空房清理、未来密码变更时必须由应用层显式删除授权。
 - 用户加入、离开、自动切换房间时，`user_joined` / `user_left` 事件应由后端 join/leave handler 显式发布，不通过 Redis trigger。
 - 空房清理必须由应用层主动触发和扫描，例如登录/注册/可选 refresh 后异步执行，或后端定时任务执行。
-- 空房清理不能只依赖 `room:pending_empty`，还需要能发现“没有在线用户但没有进入 pending empty”的房间。
+- 空房清理不能只依赖 `room:pending_empty`；`RunEmptyRoomCleanup` 已合并 `pending_empty`、活跃成员集合与 DB 房间列表（见 [docs/room_empty_cleanup_ops_zh.md](docs/room_empty_cleanup_ops_zh.md)）。
 - 如果继续使用服务端 Redis presence，需要应用层心跳/`last_seen` 机制；清理任务扫描超时用户并主动移除，不能等待 Redis 过期事件。
 - 如果采用 Ably Presence 作为在线事实来源，清理任务应主动查询 Ably 当前 presence，不通过 Redis 事件钩子等待通知。
 - 清理失败不影响登录响应，但必须记录日志/指标，便于排查线上“没有触发清理”的问题。
 
 ### 空房清理相关已知风险
 
-- 当前清理逻辑可能只扫描 `room:pending_empty`，遗漏未进入 pending empty 的空房。
+- 清理候选来自 pending + active 成员集合 + DB 列表并集，但仍受 DB `List` 单次 500 条上限影响。
 - 用户关闭页面、断网、刷新或浏览器崩溃时，如果没有显式 leave/heartbeat 过期扫描，Redis presence 可能仍保留旧成员。
 - 客户端展示的 Ably Presence 与服务端 Redis presence 可能不一致，导致前端看起来没人在线，但后端仍认为房间有人。
 - refresh token 恢复登录态如果不触发 cleanup hook，可能导致“用户打开站点但没有执行空房清理”。

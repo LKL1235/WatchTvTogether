@@ -12,7 +12,8 @@ This workspace has two repos: **WatchTvTogether** (Go backend) and **WatchTvToge
 - **Schema note**: `internal/store/postgres/schema.sql` is missing the `email` column on `users`. Run `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';` after the app auto-creates the schema, or the `GetByEmail` queries will fail.
 - **Lint**: `go vet ./...`
 - **Build**: `go build ./...`
-- **No Go tests** are present in the repo currently.
+- **Test**: `go test ./...`（含 `internal/api/router_test.go` 等集成测试；需本机 PostgreSQL/Redis 时部分用例可能跳过）
+- **Ops logs**: 空房清理诊断见 `docs/room_empty_cleanup_ops_zh.md`（`applog.Infof` → stdout，前缀 `room cleanup:`）
 
 ### Frontend (WatchTvTogether-Web)
 
