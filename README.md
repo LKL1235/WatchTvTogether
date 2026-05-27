@@ -94,6 +94,12 @@ docker compose up -d --build
 - CI: Go 测试 + 后端构建（linux/amd64）
 - CD: Tag 发布后端产物与 Docker 镜像
 
+## 设计文档
+
+- [docs/room_queue_url_only_zh.md](docs/room_queue_url_only_zh.md) — 房间 URL 队列与 `control` / `video_duration` 契约
+- [docs/room_chat_realtime_design_zh.md](docs/room_chat_realtime_design_zh.md) — 聊天（Redis Stream + Ably `room.chat`）
+- [docs/room_empty_cleanup_ops_zh.md](docs/room_empty_cleanup_ops_zh.md) — 空房清理触发、扫描范围与日志排障
+
 ## 目录
 
 - `cmd/server` 程序入口
