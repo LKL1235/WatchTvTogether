@@ -11,11 +11,13 @@
 
 | 来源 | 行为 |
 |------|------|
-| 登录 / 注册发 token 后 | `auth.SetAfterLogin` 异步调用 `MaybeRunGlobalCleanup`（不阻塞登录响应） |
+| 登录 / 注册 / **refresh token** 发 token 后 | `auth.Service.runAfterLogin` → `SetAfterLogin` 异步调用 `MaybeRunGlobalCleanup`（不阻塞 HTTP 响应） |
 | `MaybeRunGlobalCleanup` | 距上次全局清理 ≥ **5 分钟** 且抢到分布式锁（`SETNX`，TTL 2 分钟）时执行 `RunEmptyRoomCleanup` |
 | 直接调用 | 测试或运维可调用 `RunEmptyRoomCleanup`（无 5 分钟节流） |
 
 同一轮全局清理结束后还会执行 `ProcessGlobalChatPending`（补发 Ably 聊天待投递）。
+
+此外，`internal/api/router.go` 在 Redis 聊天已注入时启动 **每 30 秒** 的后台协程，独立调用 `ProcessGlobalChatPending`（与空房清理节流无关），用于 Ably 瞬时故障后的待投递补发。
 
 ---
 
@@ -68,15 +70,20 @@ room cleanup: 触发条件 来源=登录后全局清理(MaybeRunGlobalCleanup) �
 | 键 | 用途 |
 |----|------|
 | `room:pending_empty` | 待复核空房集合 |
+| `room:active` | 仍有成员集合的房间 ID（`SADD`，TTL 与成员一致） |
+| `room:members:{roomId}` | 服务端 presence 哈希（`user_id` → `username`，**7 天** TTL，每次 Join 刷新） |
+| `user:room:{userId}` | 用户当前所在房间 ID（Join 时写入，离开或迁房时更新） |
 | `global:last_room_cleanup_at` | 上次全局清理时间（毫秒） |
 | `global:room_cleanup_lock` | 全局清理互斥锁 |
 
-房间级 presence 与状态键在 `closeEmptyRoom` 中一并删除；聊天 Stream 见 [room_chat_realtime_design_zh.md](./room_chat_realtime_design_zh.md)。
+房间级播放状态、私有房授权、聊天 Stream 等在 `closeEmptyRoom` 中一并删除；聊天键名见 [room_chat_realtime_design_zh.md](./room_chat_realtime_design_zh.md)。
+
+**Join 迁房**：用户加入新房间时，Lua 脚本会从旧房 `room:members:*` 移除并在旧房人数归零时写入 `room:pending_empty`；HTTP 响应可含 `left_room_id`（见 README「加入房间」）。
 
 ---
 
 ## 5. 已知边界
 
-- DB `List` 单次最多 500 房间；超出部分依赖后续登录触发或成员离开进入 `pending_empty`。  
-- `refresh` 若未挂载 `AfterLogin`，仅打开站点可能不会触发清理（见 [Notes.md](../Notes.md)）。  
-- 用户异常断线且 presence 未剔除时，房间不会被关闭，直至 presence 归零。
+- DB `List` 单次最多 500 房间；超出部分依赖后续 **登录 / refresh** 触发或成员离开进入 `pending_empty`。  
+- 仅依赖 Ably 客户端 Presence、从未调用会更新服务端 `room:members` 的 API 时，**关房仍以服务端 `MemberCount` 为准**；与前端展示可能短暂不一致。  
+- 用户异常断线且服务端 presence 未剔除时，房间不会被关闭，直至 `MemberCount` 归零。
