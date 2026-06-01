@@ -4,6 +4,19 @@
 > 目标：与**房间控制/同步**共用同一 Ably 频道；聊天记录**仅 Redis（Stream）**、**与房间生命周期一致**、**不落盘**（不写 PostgreSQL）。  
 > **前提**：聊天功能依赖 Redis；`cache_backend` 仅支持 `redis`（房间状态、presence 等同理），本文不描述无 Redis 时的聊天占位行为。
 
+### 实现状态（2026-06）
+
+| 能力 | 状态 | 代码位置 |
+|------|------|----------|
+| `POST` / `GET /api/rooms/:id/chat` | 已实现 | `internal/api/room_handlers.go` |
+| Redis Stream + seq + pending | 已实现 | `internal/cache/redis/room_chat.go` |
+| Ably `room.chat` REST 发布 + 同步重试 | 已实现 | `internal/room/chat.go` |
+| 30s 全局 pending 补发协程 | 已实现 | `internal/api/router.go` |
+| 空房/关房删除聊天 key | 已实现 | `internal/room/hub.go` |
+| `DELETE .../chat`、独立 health 端点 | 未实现 | — |
+
+下文 §4–§8 中标注「建议」的 API/模块划分以**当前实现为准**；Redis 键名见 §5（已与代码对齐）。
+
 ---
 
 ## 1. 现状摘要（与方案衔接）
@@ -120,11 +133,13 @@ sequenceDiagram
 
 ### 5.1 主 Stream 与字段
 
-- Key：`{appPrefix}:room:{roomId}:chat:stream`（命名与现有 `room:*` key 风格对齐即可）。
+- Key（实现）：`room:chat:stream:{roomId}`（常量前缀见 `internal/cache/redis/room_chat.go`）。
 - 写入：`XADD key MAXLEN ~ {N} * field1 val1 field2 val2 ...`  
   - `MAXLEN ~ N`：近似裁剪上限条数（可配置，如 2000），避免单房间无限增长。  
   - 字段建议（示例）：`seq`、`user_id`、`payload`（整条 JSON 字符串）或拆字段 `text`、`username` 等；**推荐存一份完整 JSON 字符串**在 `payload`，查询时反序列化，减少字段演进成本。
-- 业务序号 `seq`：单独 key `{...}:room:{roomId}:chat:seq` 使用 `INCR`，在 `XADD` 前生成，保证与 Ably 载荷一致。
+- 业务序号 `seq`：单独 key `room:chat:seq:{roomId}` 使用 `INCR`，在 `XADD` 前生成，保证与 Ably 载荷一致。
+- 待投递索引：`room:chat:ably_pending:{roomId}`（ZSET，`stream_id` 为 member）。
+- 限流：`room:chat:ratelimit:{roomId}:{userId}`（`INCR` + 过期，默认每秒 `CHAT_RATE_PER_SECOND` 条）。
 - 删除房间：`DEL` 该 Stream + `DEL` seq key + `DEL` 待投递 key（§5.3），在 `CloseRoom` / `closeEmptyRoom` 中执行。
 
 ### 5.2 分页与查询
@@ -169,14 +184,14 @@ sequenceDiagram
 
 ---
 
-## 6. 服务端模块划分（建议）
+## 6. 服务端模块划分
 
 | 模块 | 职责 |
 |------|------|
 | `internal/cache/redis/room_chat.go` | `XADD`（含 MAXLEN）、`XREVRANGE` 分页、`DeleteByRoom`（含 pending key）、pending 入队/出队 |
-| `internal/api/room_handlers.go` 或 `chat_handlers.go` | 路由、鉴权绑定 |
-| `internal/room/hub.go`（或子 service） | `SendChat`（写 Stream → Publish 重试 → 可选 deferred）、`ListChat` |
-| 后台补发（可选） | 扫描 `ably_pending`，带锁与退避；与 `MaybeRunGlobalCleanup` 类似的可挂载点 |
+| `internal/api/room_handlers.go` | 路由、鉴权；**GET** 私有房 `password` 为查询参数，**POST** 为 JSON body |
+| `internal/room/chat.go` | `SendChat`（写 Stream → Publish 重试 → `deferred`）、`ListChat`、`ProcessGlobalChatPending` |
+| `internal/api/router.go` | 每 **30s** 调用 `ProcessGlobalChatPending`；全局空房清理结束后亦调用一次 |
 | `CloseRoom` / `closeEmptyRoom` | 删除 Stream、seq、pending 等所有聊天 key |
 
 **限流**：每用户每房间每秒 N 条；可用 Redis `INCR` + 过期。
@@ -230,13 +245,13 @@ sequenceDiagram
 
 ---
 
-## 11. 实施顺序建议（里程碑）
+## 11. 里程碑（已完成项）
 
-1. **Redis Stream 封装** + `CloseRoom`/`closeEmptyRoom` 删除所有聊天 key。  
-2. **HTTP POST/GET** + Ably Publish + **同步重试**。  
-3. **（可选）** pending ZSET + 后台补发协程。  
-4. **前端** 订阅与 UI。  
-5. 限流、README、环境变量（示例：`CHAT_STREAM_MAXLEN`、`CHAT_ABLY_PUBLISH_RETRY=2`（失败后再试次数）、`CHAT_ABLY_PUBLISH_TOTAL_TIMEOUT=10s`、`CHAT_ABLY_PENDING_MAX`（每房间 pending 上限））。
+1. Redis Stream 封装 + 关房删除聊天 key — **已完成**  
+2. HTTP POST/GET + Ably Publish + 同步重试 — **已完成**  
+3. pending ZSET + 30s 后台补发 — **已完成**  
+4. 前端 `room.chat` 订阅与聊天 UI — **已完成**（见 Web README）  
+5. 限流与环境变量 — **已完成**（`CHAT_*`，见根目录 `.env.example`）
 
 ---
 
@@ -260,4 +275,4 @@ sequenceDiagram
 
 ---
 
-*本文件为设计计划，实现前若对外 API 或 Redis key 命名有变更，请再评审后编码。*
+*对外 API 或 Redis key 变更时请同步更新本文与根 `README.md`。*

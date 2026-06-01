@@ -41,4 +41,4 @@ https://github.com/LKL1235/WatchTvTogether-Web/branches
 - 清理候选来自 pending + active 成员集合 + DB 列表并集，但仍受 DB `List` 单次 500 条上限影响。
 - 用户关闭页面、断网、刷新或浏览器崩溃时，如果没有显式 leave/heartbeat 过期扫描，Redis presence 可能仍保留旧成员。
 - 客户端展示的 Ably Presence 与服务端 Redis presence 可能不一致，导致前端看起来没人在线，但后端仍认为房间有人。
-- refresh token 恢复登录态如果不触发 cleanup hook，可能导致“用户打开站点但没有执行空房清理”。
+- 仅刷新页面、长期不调用会触发 `runAfterLogin` 的 API（登录 / 注册 / **refresh**）时，全局空房清理仍受 5 分钟节流；极端情况下 DB 列表外的房间可能需等待下次触发。
